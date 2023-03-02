@@ -1,0 +1,406 @@
+diff --git a/configure.ac b/configure.ac
+index cc7139c7c..a7e85a055 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -416,13 +416,6 @@ AS_CASE([$host],
+     ])
+     parport_use_giveio=yes
+ 
+-    AS_IF([test "x$enable_buspirate" = "xyes"], [
+-      AC_MSG_ERROR([buspirate currently not supported by MinGW32 hosts])
+-    ])
+-
+-    # In case enable_buspirate=auto, make sure it will not be built.
+-    enable_buspirate=no
+-
+     AC_SUBST([HOST_CPPFLAGS], [-D__USE_MINGW_ANSI_STDIO])
+   ],
+   [*darwin*], [
+diff --git a/src/jtag/drivers/buspirate.c b/src/jtag/drivers/buspirate.c
+index 03b48e68b..099d3298a 100644
+--- a/src/jtag/drivers/buspirate.c
++++ b/src/jtag/drivers/buspirate.c
+@@ -14,9 +14,17 @@
+ #include <jtag/swd.h>
+ #include <jtag/commands.h>
+ 
++#ifdef _WIN32
++#include <windows.h>
++typedef HANDLE serial_fd_t;
++#define SERIAL_FD_INVALID INVALID_HANDLE_VALUE
++#else
+ #include <termios.h>
+ #include <fcntl.h>
+ #include <sys/ioctl.h>
++typedef int serial_fd_t;
++#define SERIAL_FD_INVALID -1
++#endif
+ 
+ #undef DEBUG_SERIAL
+ /*#define DEBUG_SERIAL */
+@@ -101,7 +109,7 @@ static bool swd_mode;
+ static int  queued_retval;
+ static char swd_features;
+ 
+-static int buspirate_fd = -1;
++static serial_fd_t buspirate_fd = SERIAL_FD_INVALID;
+ static int buspirate_pinmode = MODE_JTAG_OD;
+ static int buspirate_baudrate = SERIAL_NORMAL;
+ static int buspirate_vreg;
+@@ -125,30 +133,30 @@ static void buspirate_tap_append_scan(int length, uint8_t *buffer,
+ 		struct scan_command *command);
+ static void buspirate_tap_make_space(int scan, int bits);
+ 
+-static void buspirate_set_feature(int, char, char);
+-static void buspirate_set_mode(int, char);
+-static void buspirate_set_speed(int, char);
++static void buspirate_set_feature(serial_fd_t, char, char);
++static void buspirate_set_mode(serial_fd_t, char);
++static void buspirate_set_speed(serial_fd_t, char);
+ 
+ /* low level interface */
+-static void buspirate_bbio_enable(int);
+-static void buspirate_jtag_reset(int);
+-static unsigned char buspirate_jtag_command(int, uint8_t *, int);
+-static void buspirate_jtag_set_speed(int, char);
+-static void buspirate_jtag_set_mode(int, char);
+-static void buspirate_jtag_set_feature(int, char, char);
+-static void buspirate_jtag_get_adcs(int);
++static void buspirate_bbio_enable(serial_fd_t);
++static void buspirate_jtag_reset(serial_fd_t);
++static unsigned char buspirate_jtag_command(serial_fd_t, uint8_t *, int);
++static void buspirate_jtag_set_speed(serial_fd_t, char);
++static void buspirate_jtag_set_mode(serial_fd_t, char);
++static void buspirate_jtag_set_feature(serial_fd_t, char, char);
++static void buspirate_jtag_get_adcs(serial_fd_t);
+ 
+ /* low level two-wire interface */
+-static void buspirate_swd_set_speed(int, char);
+-static void buspirate_swd_set_feature(int, char, char);
+-static void buspirate_swd_set_mode(int, char);
++static void buspirate_swd_set_speed(serial_fd_t, char);
++static void buspirate_swd_set_feature(serial_fd_t, char, char);
++static void buspirate_swd_set_mode(serial_fd_t, char);
+ 
+ /* low level HW communication interface */
+-static int buspirate_serial_open(char *port);
+-static int buspirate_serial_setspeed(int fd, char speed, cc_t timeout);
+-static int buspirate_serial_write(int fd, uint8_t *buf, int size);
+-static int buspirate_serial_read(int fd, uint8_t *buf, int size);
+-static void buspirate_serial_close(int fd);
++static serial_fd_t buspirate_serial_open(char *port);
++static int buspirate_serial_setspeed(serial_fd_t fd, char speed, int timeout);
++static int buspirate_serial_write(serial_fd_t fd, uint8_t *buf, int size);
++static int buspirate_serial_read(serial_fd_t fd, uint8_t *buf, int size);
++static void buspirate_serial_close(serial_fd_t fd);
+ static void buspirate_print_buffer(uint8_t *buf, int size);
+ 
+ static int buspirate_execute_queue(void)
+@@ -227,10 +235,12 @@ static int buspirate_execute_queue(void)
+ 
+ /* Returns true if successful, false if error. */
+ 
+-static bool read_and_discard_all_data(const int fd)
++static bool read_and_discard_all_data(const serial_fd_t fd)
+ {
+ 	/* LOG_INFO("Discarding any stale data from a previous connection..."); */
+-
++#ifdef _WIN32
++	return PurgeComm(fd, PURGE_RXCLEAR | PURGE_TXCLEAR);
++#else
+ 	bool was_msg_already_printed = false;
+ 
+ 	for ( ; ; ) {
+@@ -269,6 +279,7 @@ static bool read_and_discard_all_data(const int fd)
+ 		/* Some other error has occurred. */
+ 		return false;
+ 	}
++#endif
+ }
+ 
+ 
+@@ -280,7 +291,7 @@ static int buspirate_init(void)
+ 	}
+ 
+ 	buspirate_fd = buspirate_serial_open(buspirate_port);
+-	if (buspirate_fd == -1) {
++	if (buspirate_fd == SERIAL_FD_INVALID) {
+ 		LOG_ERROR("Could not open serial port");
+ 		return ERROR_JTAG_INIT_FAILED;
+ 	}
+@@ -351,7 +362,7 @@ static int buspirate_quit(void)
+ /* openocd command interface */
+ COMMAND_HANDLER(buspirate_handle_adc_command)
+ {
+-	if (buspirate_fd == -1)
++	if (buspirate_fd == SERIAL_FD_INVALID)
+ 		return ERROR_OK;
+ 
+ 	/* unavailable in SWD mode */
+@@ -870,7 +881,7 @@ static int buspirate_reset(int trst, int srst)
+ 	return ERROR_OK;
+ }
+ 
+-static void buspirate_set_feature(int fd, char feat, char action)
++static void buspirate_set_feature(serial_fd_t fd, char feat, char action)
+ {
+ 	if (swd_mode)
+ 		buspirate_swd_set_feature(fd, feat, action);
+@@ -878,7 +889,7 @@ static void buspirate_set_feature(int fd, char feat, char action)
+ 		buspirate_jtag_set_feature(fd, feat, action);
+ }
+ 
+-static void buspirate_set_mode(int fd, char mode)
++static void buspirate_set_mode(serial_fd_t fd, char mode)
+ {
+ 	if (swd_mode)
+ 		buspirate_swd_set_mode(fd, mode);
+@@ -886,7 +897,7 @@ static void buspirate_set_mode(int fd, char mode)
+ 		buspirate_jtag_set_mode(fd, mode);
+ }
+ 
+-static void buspirate_set_speed(int fd, char speed)
++static void buspirate_set_speed(serial_fd_t fd, char speed)
+ {
+ 	if (swd_mode)
+ 		buspirate_swd_set_speed(fd, speed);
+@@ -897,7 +908,7 @@ static void buspirate_set_speed(int fd, char speed)
+ 
+ /*************** swd lowlevel functions ********************/
+ 
+-static void buspirate_swd_set_speed(int fd, char speed)
++static void buspirate_swd_set_speed(serial_fd_t fd, char speed)
+ {
+ 	int  ret;
+ 	uint8_t tmp[1];
+@@ -918,7 +929,7 @@ static void buspirate_swd_set_speed(int fd, char speed)
+ 	}
+ }
+ 
+-static void buspirate_swd_set_mode(int fd, char mode)
++static void buspirate_swd_set_mode(serial_fd_t fd, char mode)
+ {
+ 	int ret;
+ 	uint8_t tmp[1];
+@@ -941,7 +952,7 @@ static void buspirate_swd_set_mode(int fd, char mode)
+ 	}
+ }
+ 
+-static void buspirate_swd_set_feature(int fd, char feat, char action)
++static void buspirate_swd_set_feature(serial_fd_t fd, char feat, char action)
+ {
+ 	int  ret;
+ 	uint8_t tmp[1];
+@@ -979,7 +990,7 @@ static void buspirate_swd_set_feature(int fd, char feat, char action)
+ }
+ 
+ /*************** jtag lowlevel functions ********************/
+-static void buspirate_bbio_enable(int fd)
++static void buspirate_bbio_enable(serial_fd_t fd)
+ {
+ 	int ret;
+ 	char command;
+@@ -1040,7 +1051,7 @@ static void buspirate_bbio_enable(int fd)
+ 
+ }
+ 
+-static void buspirate_jtag_reset(int fd)
++static void buspirate_jtag_reset(serial_fd_t fd)
+ {
+ 	uint8_t tmp[5];
+ 
+@@ -1056,7 +1067,7 @@ static void buspirate_jtag_reset(int fd)
+ 		LOG_ERROR("Unable to restart buspirate!");
+ }
+ 
+-static void buspirate_jtag_set_speed(int fd, char speed)
++static void buspirate_jtag_set_speed(serial_fd_t fd, char speed)
+ {
+ 	int ret;
+ 	uint8_t tmp[2];
+@@ -1090,7 +1101,7 @@ static void buspirate_jtag_set_speed(int fd, char speed)
+ }
+ 
+ 
+-static void buspirate_jtag_set_mode(int fd, char mode)
++static void buspirate_jtag_set_mode(serial_fd_t fd, char mode)
+ {
+ 	uint8_t tmp[2];
+ 	tmp[0] = CMD_PORT_MODE;
+@@ -1098,7 +1109,7 @@ static void buspirate_jtag_set_mode(int fd, char mode)
+ 	buspirate_jtag_command(fd, tmp, 2);
+ }
+ 
+-static void buspirate_jtag_set_feature(int fd, char feat, char action)
++static void buspirate_jtag_set_feature(serial_fd_t fd, char feat, char action)
+ {
+ 	uint8_t tmp[3];
+ 	tmp[0] = CMD_FEATURE;
+@@ -1107,7 +1118,7 @@ static void buspirate_jtag_set_feature(int fd, char feat, char action)
+ 	buspirate_jtag_command(fd, tmp, 3);
+ }
+ 
+-static void buspirate_jtag_get_adcs(int fd)
++static void buspirate_jtag_get_adcs(serial_fd_t fd)
+ {
+ 	uint8_t tmp[10];
+ 	uint16_t a, b, c, d;
+@@ -1124,7 +1135,7 @@ static void buspirate_jtag_get_adcs(int fd)
+ 		((float)c)/155.1515, ((float)d)/155.1515);
+ }
+ 
+-static unsigned char buspirate_jtag_command(int fd,
++static unsigned char buspirate_jtag_command(serial_fd_t fd,
+ 		uint8_t *cmd, int cmdlen)
+ {
+ 	int res;
+@@ -1161,18 +1172,77 @@ static unsigned char buspirate_jtag_command(int fd,
+ 
+ /* low level serial port */
+ /* TODO add support for WIN32 and others ! */
+-static int buspirate_serial_open(char *port)
++static serial_fd_t buspirate_serial_open(char *port)
+ {
+-	int fd;
++	serial_fd_t fd;
++#ifdef _WIN32
++	fd = CreateFile(port,
++		GENERIC_READ | GENERIC_WRITE,
++		0,
++		NULL,
++        OPEN_EXISTING,
++		0,
++		NULL);
++#else
+ 	fd = open(buspirate_port, O_RDWR | O_NOCTTY | O_NDELAY);
++#endif
+ 	return fd;
+ }
+ 
+ 
+ /* Returns -1 on error. */
+ 
+-static int buspirate_serial_setspeed(int fd, char speed, cc_t timeout)
++static int buspirate_serial_setspeed(serial_fd_t fd, char speed, int timeout)
+ {
++#ifdef _WIN32
++	DCB dcb;
++	COMMTIMEOUTS timeouts;
++
++	memset(&dcb, 0, sizeof(dcb));
++	memset(&timeouts, 0, sizeof(timeouts));
++
++	dcb.DCBlength = sizeof(DCB);
++
++	if(!GetCommState(fd, &dcb))
++	{
++		return -1;
++	}
++
++	/* Standard 8N1, no flow control */
++
++	dcb.BaudRate = (speed == SERIAL_FAST) ? 1000000 : 115200;;
++	dcb.ByteSize = 8;
++	dcb.Parity = NOPARITY;
++	dcb.StopBits = ONESTOPBIT;
++
++	dcb.fBinary = TRUE;
++	dcb.fParity = FALSE;
++	dcb.fOutxCtsFlow = FALSE;
++	dcb.fOutxDsrFlow = FALSE;
++	dcb.fDtrControl = DTR_CONTROL_DISABLE;
++	dcb.fDsrSensitivity = FALSE;
++	dcb.fTXContinueOnXoff = FALSE;
++	dcb.fOutX = FALSE;
++	dcb.fInX = FALSE;
++	dcb.fErrorChar = FALSE;
++	dcb.fNull = FALSE;
++	dcb.fRtsControl = RTS_CONTROL_DISABLE;
++	dcb.fAbortOnError = FALSE;
++
++	if(!SetCommState(fd, &dcb))
++	{
++		return -1;
++	}
++
++	/* convert from deci-seconds to milliseconds */
++	timeouts.ReadIntervalTimeout = timeout * 100;
++	if(!SetCommTimeouts(fd, &timeouts))
++	{
++		return -1;
++	}
++
++	return 0;
++#else
+ 	struct termios t_opt;
+ 	speed_t baud = (speed == SERIAL_FAST) ? B1000000 : B115200;
+ 
+@@ -1212,15 +1282,25 @@ static int buspirate_serial_setspeed(int fd, char speed, cc_t timeout)
+ 		   all changes have been performed successfully. */
+ 		return -1;
+ 	}
+-
+ 	return 0;
++#endif
+ }
+ 
+-static int buspirate_serial_write(int fd, uint8_t *buf, int size)
++static int buspirate_serial_write(serial_fd_t fd, uint8_t *buf, int size)
+ {
+ 	int ret = 0;
+ 
++#ifdef _WIN32
++	DWORD bytes_written = 0;
++	if(!WriteFile(fd, buf, size, &bytes_written, NULL))
++	{
++		LOG_ERROR("Error writing data");
++	}
++
++	ret = bytes_written;
++#else
+ 	ret = write(fd, buf, size);
++#endif
+ 
+ 	LOG_DEBUG("size = %d ret = %d", size, ret);
+ 	buspirate_print_buffer(buf, size);
+@@ -1231,14 +1311,24 @@ static int buspirate_serial_write(int fd, uint8_t *buf, int size)
+ 	return ret;
+ }
+ 
+-static int buspirate_serial_read(int fd, uint8_t *buf, int size)
++static int buspirate_serial_read(serial_fd_t fd, uint8_t *buf, int size)
+ {
+ 	int len = 0;
+ 	int ret = 0;
+ 	int timeout = 0;
+ 
+ 	while (len < size) {
++#ifdef _WIN32
++		DWORD bytes_read;
++		if(!ReadFile(fd, buf + len, size - len, &bytes_read, NULL))
++		{
++			return -1;
++		}
++
++		ret = bytes_read;
++#else
+ 		ret = read(fd, buf+len, size-len);
++#endif
+ 		if (ret == -1)
+ 			return -1;
+ 
+@@ -1263,9 +1353,13 @@ static int buspirate_serial_read(int fd, uint8_t *buf, int size)
+ 	return len;
+ }
+ 
+-static void buspirate_serial_close(int fd)
++static void buspirate_serial_close(serial_fd_t fd)
+ {
++#ifdef _WIN32
++	CloseHandle(fd);
++#else
+ 	close(fd);
++#endif
+ }
+ 
+ #define LINE_SIZE      81
