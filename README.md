@@ -9,6 +9,10 @@ This is basically a list of small development boards that I have, which I think 
 * [LPC845-BRK](https://www.nxp.com/products/processors-and-microcontrollers/arm-microcontrollers/general-purpose-mcus/lpc800-arm-cortex-m0-plus-/lpc845-breakout-board-for-lpc84x-family-mcus:LPC845-BRK) - [Environment setup and details](docs/lpc845-brk.md)
 * TODO: Some random STM32F411 on a PCB that I have
 
+## Architecture
+
+Further details about the architecture can be found [here](docs/architecture.md).
+
 ## Motivation
 
 Over the years, I've picked up quite a few development boards, but oddly enough, never really bought a general purpose JTAG dongle.  I recently bought a few cheap dev kits that can be flashed over their onboard serial port, but can only be debugged via JTAG.
