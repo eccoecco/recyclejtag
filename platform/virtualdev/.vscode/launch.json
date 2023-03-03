@@ -8,7 +8,7 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/rjcore",
+            "program": "${workspaceFolder}/build/rjtag",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

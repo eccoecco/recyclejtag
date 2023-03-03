@@ -4,9 +4,9 @@ project(rjcore)
 
 add_subdirectory(../../librjcore librjcore)
 
-add_executable(rjcore
+add_executable(rjtag
     main.cpp
 )
-target_link_libraries(rjcore
+target_link_libraries(rjtag
     librjcore
 )
