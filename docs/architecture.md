@@ -20,7 +20,7 @@ On the other hand, on platforms with USB inbuilt that provide a CDC ACM driver (
 
 It really is up to the platform, so the core is designed with a bit of flexibility in mind to support these scenarios.
 
-A lot of the platforms that I'm targetting support C++17 now (but not necessarily the standard C++ libraries), so I'll use that.
+The core is written in an event driven manner, where events change the state machine of the core.
 
 ## Platform Implementation
 
