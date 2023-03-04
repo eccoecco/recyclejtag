@@ -61,7 +61,7 @@ class PosixFile
     int m_fd;
 };
 
-/// @brief Creates a pair of pseudo-terminals
+/// @brief Creates a pseudo-terminal that openocd can connect to
 class PseudoTerminal
 {
   public:
