@@ -6,6 +6,7 @@ add_subdirectory(../../librjcore librjcore)
 
 add_executable(rjtag
     main.cpp
+    runcore.cpp
 )
 target_link_libraries(rjtag
     librjcore
