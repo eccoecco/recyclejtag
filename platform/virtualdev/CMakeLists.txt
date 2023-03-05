@@ -11,3 +11,5 @@ add_executable(rjtag
 target_link_libraries(rjtag
     librjcore
 )
+target_compile_features(rjtag PRIVATE cxx_std_20)
+
