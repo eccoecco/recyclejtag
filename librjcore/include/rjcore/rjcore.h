@@ -25,6 +25,11 @@
 #define RJCORE_TIMEOUT_BINARY_MODE 30000
 #endif
 
+#ifndef RJCORE_TIMEOUT_SERIAL_MODE_ACK
+// How long to wait for an ack message when the serial mode has changed
+#define RJCORE_TIMEOUT_SERIAL_MODE_ACK 250
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -50,13 +55,18 @@ struct RJCoreState
         {
             int validBytes;
         } handshake;
+        struct
+        {
+            uint8_t mode;
+            uint8_t value;
+        } serial; //!< Used to keep track when setting serial mode
     } state;
 
-    uint32_t currentTime;        //!< Current receive activity
-    uint32_t lastRxActivityTime; //!< When receive activity was last detected
+    uint32_t timeSinceLastRxActivity; //!< How long since last activity time was detected
+    uint32_t lastRxActivityTime;      //!< When receive activity was last detected
 
-    int bytesReceived;         // Number of bytes that have been received this event
-    const char *receiveBuffer; // Pointer to the received data
+    int bytesReceived;            // Number of bytes that have been received this event
+    const uint8_t *receiveBuffer; // Pointer to the received data
 };
 
 /// @brief Initialises the core state machine to start
@@ -68,7 +78,7 @@ void RJCore_Init(struct RJCoreState *state, struct RJCorePlatform *platform, voi
 /// @brief Notifies the core that data has been received on the uart
 /// @param data Pointer to the data received (or NULL if a timeout)
 /// @param bytesReceived How many bytes have been received (or 0 if a timeout)
-void RJCore_NotifyDataReceived(struct RJCoreState *state, const char *data, size_t bytesReceived);
+void RJCore_NotifyDataReceived(struct RJCoreState *state, const uint8_t *data, size_t bytesReceived);
 
 #ifdef __cplusplus
 }

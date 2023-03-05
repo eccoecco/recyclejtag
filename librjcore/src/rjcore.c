@@ -17,6 +17,8 @@ enum BusPirateCommand
 
 static int RJCoreState_Handshake(struct RJCoreState *state);
 static int RJCoreState_BinaryMode(struct RJCoreState *state);
+static int RJCoreState_SetSerialSpeed(struct RJCoreState *state);
+static int RJCoreState_AwaitAck(struct RJCoreState *state);
 
 static inline void RJCore_ChangeToState(struct RJCoreState *state, RJCoreStateCallback callback)
 {
@@ -36,10 +38,19 @@ void RJCore_Init(struct RJCoreState *state, struct RJCorePlatform *platform, voi
     RJCore_ChangeToState(state, RJCoreState_Handshake);
 }
 
-void RJCore_NotifyDataReceived(struct RJCoreState *state, const char *data, size_t bytesReceived)
+void RJCore_NotifyDataReceived(struct RJCoreState *state, const uint8_t *data, size_t bytesReceived)
 {
-    bool rxActivity = (bytesReceived > 0);
-    state->currentTime = state->platform->currentUptime(state->privateData);
+    uint32_t currentTime = state->platform->currentUptime(state->privateData);
+
+    if (bytesReceived > 0)
+    {
+        state->timeSinceLastRxActivity = 0;
+        state->lastRxActivityTime = currentTime;
+    }
+    else
+    {
+        state->timeSinceLastRxActivity = currentTime - state->lastRxActivityTime;
+    }
 
     do
     {
@@ -88,11 +99,6 @@ void RJCore_NotifyDataReceived(struct RJCoreState *state, const char *data, size
         }
 
     } while (bytesReceived > 0);
-
-    if (rxActivity)
-    {
-        state->lastRxActivityTime = state->currentTime;
-    }
 }
 
 static int RJCoreState_Handshake(struct RJCoreState *state)
@@ -105,7 +111,7 @@ static int RJCoreState_Handshake(struct RJCoreState *state)
     }
 
     // If nothing has happened for a while, reset everything
-    if ((state->currentTime - state->lastRxActivityTime) > RJCORE_TIMEOUT_HANDSHAKE)
+    if (state->timeSinceLastRxActivity > RJCORE_TIMEOUT_HANDSHAKE)
     {
         state->state.handshake.validBytes = 0;
     }
@@ -127,7 +133,7 @@ static int RJCoreState_Handshake(struct RJCoreState *state)
                 if (state->state.handshake.validBytes == 20)
                 {
                     // Send the Bus Pirate identifier
-                    state->platform->transmitData(state->privateData, "BBIO1", 5);
+                    (*state->platform->transmitData)(state->privateData, "BBIO1", 5);
                 }
             }
             // Okay to keep on receiving lots of zeroes - it might be that some were errant
@@ -135,9 +141,10 @@ static int RJCoreState_Handshake(struct RJCoreState *state)
         case BusPirateCommand_EnterOpenOCD:
             if (state->state.handshake.validBytes == 20)
             {
-                state->platform->transmitData(state->privateData, "OCD1", 4);
+                (*state->platform->transmitData)(state->privateData, "OCD1", 4);
                 RJCore_ChangeToState(state, RJCoreState_BinaryMode);
-                return bytesProcessed;
+                // +1, have processed the current byte
+                return bytesProcessed + 1;
             }
             else
             {
@@ -164,7 +171,7 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
     }
 
     // If nothing has happened for a while, go back to handshake mode
-    if ((state->currentTime - state->lastRxActivityTime) > RJCORE_TIMEOUT_BINARY_MODE)
+    if (state->timeSinceLastRxActivity > RJCORE_TIMEOUT_BINARY_MODE)
     {
         return -1;
     }
@@ -174,7 +181,96 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
         return 0;
     }
 
+    switch (state->receiveBuffer[0])
+    {
+    case BusPirateCommand_UartSpeed:
+        RJCore_ChangeToState(state, RJCoreState_SetSerialSpeed);
+        return 1;
+    }
+
     // TODO: Handle binary mode commands
 
     return -1;
+}
+
+static int RJCoreState_SetSerialSpeed(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_SetSerialSpeed)
+    {
+        state->state.serial.mode = 0;
+        state->state.serial.value = 0;
+        return 0;
+    }
+
+    if (state->bytesReceived == 0)
+    {
+        return 0;
+    }
+
+    uint8_t newMode = state->receiveBuffer[0];
+    state->state.serial.mode = newMode;
+
+    if (!(*state->platform->setSerialMode)(state->privateData, newMode))
+    {
+        // Unable to support requested serial port mode
+        return -1;
+    }
+
+    RJCore_ChangeToState(state, RJCoreState_AwaitAck);
+
+    return 1;
+}
+
+static int RJCoreState_AwaitAck(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_AwaitAck)
+    {
+        return 0;
+    }
+
+    if (state->timeSinceLastRxActivity >= RJCORE_TIMEOUT_SERIAL_MODE_ACK)
+    {
+        // Timed out!  Just go back to handshake mode
+        return -1;
+    }
+
+    if (state->bytesReceived == 0)
+    {
+        return 0;
+    }
+
+    int bytesProcessed = 0;
+    const uint8_t *unprocessedByte = state->receiveBuffer;
+
+    if (state->state.serial.value == 0)
+    {
+        if (*unprocessedByte != 0xAA)
+        {
+            return -1;
+        }
+
+        ++state->state.serial.value;
+        ++bytesProcessed;
+        ++unprocessedByte;
+    }
+
+    if ((state->state.serial.value == 1) && (bytesProcessed < state->bytesReceived))
+    {
+        if (*unprocessedByte != 0x55)
+        {
+            return -1;
+        }
+
+        char reply[2] = {
+            BusPirateCommand_UartSpeed,
+            state->state.serial.mode,
+        };
+
+        (*state->platform->transmitData)(state->privateData, reply, 2);
+
+        RJCore_ChangeToState(state, RJCoreState_BinaryMode);
+        ++bytesProcessed;
+    }
+
+    return bytesProcessed;
 }

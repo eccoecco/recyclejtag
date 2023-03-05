@@ -35,6 +35,23 @@ void PlatformImpl_TransmitData(void *platformData, const char *buffer, size_t le
     write(data->fd, buffer, length);
 }
 
+bool PlatformImpl_SetSerialMode(void *platformData, enum RJCoreSerialMode mode)
+{
+    (void)platformData;
+
+    int baud = (mode == 0) ? 115200 : (mode == 1) ? 1000000 : -1;
+
+    if (baud < 0)
+    {
+        std::cout << "Unknown serial mode: " << mode << '\n';
+        return false;
+    }
+
+    // Yeah, sure, we support all sorts of baud rates.
+    std::cout << "Serial port baud request to " << baud << " baud\n";
+    return true;
+}
+
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)
 {
     int epfd = epoll_create(1);
@@ -85,6 +102,7 @@ void startRjCore(int fd)
     RJCorePlatform platform{
         .currentUptime = PlatformImpl_CurrentUptime,
         .transmitData = PlatformImpl_TransmitData,
+        .setSerialMode = PlatformImpl_SetSerialMode,
     };
     PlatformData platformData{
         .fd = fd,
@@ -96,7 +114,7 @@ void startRjCore(int fd)
     {
         struct epoll_event event;
         int descriptorsReady;
-        std::array<char, 64> buffer;
+        std::array<uint8_t, 64> buffer;
         int bytesRead;
 
         descriptorsReady = epoll_wait(ep->Descriptor(), &event, 1, epollTimeout_ms);
