@@ -107,6 +107,8 @@ static int RJCoreState_Handshake(struct RJCoreState *state)
     {
         // Entering this state, so just clear our state
         state->state.handshake.validBytes = 0;
+        // Reset UART to 115,200
+        (*state->platform->setSerialMode)(state->privateData, RJCoreSerialMode_Normal);
         return 0;
     }
 
