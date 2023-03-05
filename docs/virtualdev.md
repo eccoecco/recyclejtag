@@ -20,7 +20,8 @@ Connect OpenOCD to: '/dev/pts/4'
 You may now run:
 
 ```
-openocd -f interface/buspirate.cfg -c 'buspirate port /dev/pts/4'
+openocd -f interface/buspirate.cfg -c 'buspirate_port /dev/pts/4' -c 'transport select jtag'
+# More recent versions of OpenOCD use `buspirate port` instead of `buspirate_port`
 ```
 
 ## Manually
@@ -44,7 +45,7 @@ build/rjtag /dev/pts/7
 
 In another terminal:
 ```
-openocd -f interface/buspirate.cfg -c 'buspirate port /dev/pts/8'
+openocd -f interface/buspirate.cfg -c 'buspirate_port /dev/pts/8'  -c 'transport select jtag'
 ```
 
 The advantage of this method, despite it being a bit more cumbersome is that the created pseudo-terminal entries persist and are constant as long as `socat` is running, no matter how many terminals are open.
