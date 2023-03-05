@@ -13,11 +13,6 @@
 
 #include "rjcoreplatform.h"
 
-#ifndef RJCORE_MAX_READ_BUFFER_SIZE
-// Different platforms can redefine this for optimum performance
-#define RJCORE_MAX_READ_BUFFER_SIZE 64
-#endif
-
 #ifndef RJCORE_TIMEOUT_HANDSHAKE
 // Timeout on the handshake, in whatever units the platform timer provides
 // The default is to assume ms, and have a short timeout
@@ -36,7 +31,11 @@ extern "C"
 #endif
 
 struct RJCoreState;
-typedef void (*RJCoreStateCallback)(struct RJCoreState *);
+
+// All callbacks must return:
+// <0 - Internal error - go back to initial state (will flush read buffer)
+// else number of bytes processed (can be 0)
+typedef int (*RJCoreStateCallback)(struct RJCoreState *);
 
 /// @brief Recycle JTAG core state machine
 struct RJCoreState
@@ -53,11 +52,11 @@ struct RJCoreState
         } handshake;
     } state;
 
-    uint32_t currentRxActivityTime; //!< Current receive activity
-    uint32_t lastRxActivityTime;    //!< When receive activity was last detected
-    int bytesBeforeCallback;        //!< Bytes that are needed in the read buffer before invoking the state
-    int bytesInBuffer;              //!< Number of valid bytes in the read buffer
-    char readBuffer[RJCORE_MAX_READ_BUFFER_SIZE]; //!< Used to buffer data from the uart
+    uint32_t currentTime;        //!< Current receive activity
+    uint32_t lastRxActivityTime; //!< When receive activity was last detected
+
+    int bytesReceived;         // Number of bytes that have been received this event
+    const char *receiveBuffer; // Pointer to the received data
 };
 
 /// @brief Initialises the core state machine to start
@@ -67,12 +66,9 @@ struct RJCoreState
 void RJCore_Init(struct RJCoreState *state, struct RJCorePlatform *platform, void *privateData);
 
 /// @brief Notifies the core that data has been received on the uart
-/// @param data Pointer to the data received
-/// @param bytesReceived How many bytes have been received
-void RJCore_NotifyDataReceived(const char *data, size_t bytesReceived);
-
-/// @brief Notifies the core that a timer event has occurred (used to check for timeouts)
-void RJCore_NotifyTimer(void);
+/// @param data Pointer to the data received (or NULL if a timeout)
+/// @param bytesReceived How many bytes have been received (or 0 if a timeout)
+void RJCore_NotifyDataReceived(struct RJCoreState *state, const char *data, size_t bytesReceived);
 
 #ifdef __cplusplus
 }
