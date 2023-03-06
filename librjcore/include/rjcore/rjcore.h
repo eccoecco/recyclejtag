@@ -30,6 +30,10 @@
 #define RJCORE_TIMEOUT_SERIAL_MODE_ACK 250
 #endif
 
+#ifndef RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT
+#define RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT 0x2000
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -65,6 +69,11 @@ struct RJCoreState
             uint8_t counter;
             uint8_t feature;
         } feature; //!< Used to keep track of what feature request is being changed
+        struct
+        {
+            uint16_t bitsToShift;
+            uint8_t counter;
+        } tapShift;
     } state;
 
     uint32_t timeSinceLastRxActivity; //!< How long since last activity time was detected

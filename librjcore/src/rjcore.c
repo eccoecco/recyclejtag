@@ -22,6 +22,8 @@ static int RJCoreState_AwaitAck(struct RJCoreState *state);
 static int RJCoreState_SetPortState(struct RJCoreState *state);
 static int RJCoreState_SetFeature(struct RJCoreState *state);
 static int RJCoreState_ReadVoltages(struct RJCoreState *state);
+static int RJCoreState_InitTapShift(struct RJCoreState *state);
+static int RJCoreState_ExecuteTapShift(struct RJCoreState *state);
 
 static inline void RJCore_ChangeToState(struct RJCoreState *state, RJCoreStateCallback callback)
 {
@@ -199,6 +201,9 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
         return 1;
     case BusPirateCommand_ReadADCs:
         RJCore_ChangeToState(state, RJCoreState_ReadVoltages);
+        return 1;
+    case BusPirateCommand_TapShift:
+        RJCore_ChangeToState(state, RJCoreState_InitTapShift);
         return 1;
     }
 
@@ -396,3 +401,72 @@ static int RJCoreState_ReadVoltages(struct RJCoreState *state)
     return 0;
 }
 
+static int RJCoreState_InitTapShift(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_InitTapShift)
+    {
+        state->state.tapShift.bitsToShift = 0;
+        state->state.tapShift.counter = 0;
+
+        return 0;
+    }
+
+    int bytesProcessed = 0;
+    const uint8_t *buffer = state->receiveBuffer;
+
+    while (state->state.tapShift.counter < 2)
+    {
+        if (bytesProcessed >= state->bytesReceived)
+        {
+            break;
+        }
+
+        state->state.tapShift.bitsToShift <<= 8;
+        state->state.tapShift.bitsToShift += *buffer;
+
+        ++state->state.tapShift.counter;
+        ++bytesProcessed;
+        ++buffer;
+    }
+
+    if (state->state.tapShift.counter == 2)
+    {
+        uint8_t reply[3];
+        reply[0] = BusPirateCommand_TapShift;
+
+        if (state->state.tapShift.bitsToShift > RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT)
+        {
+            state->state.tapShift.bitsToShift = RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT;
+        }
+
+        // Bus Pirate proper echoes back what was received, but this sends back the actual bits shifted
+        // just to determine the limit.  It doesn't actually matter, though, because OpenOCD ignores the
+        // reply... I could just fill this with 0s.
+        reply[1] = (state->state.tapShift.bitsToShift >> 8) & 0xFF;
+        reply[2] = state->state.tapShift.bitsToShift & 0xFF;
+
+        (*state->platform->transmitData)(state->privateData, reply, 3);
+
+        RJCore_ChangeToState(state, RJCoreState_ExecuteTapShift);
+    }
+
+    return bytesProcessed;
+}
+
+static int RJCoreState_ExecuteTapShift(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_ExecuteTapShift)
+    {
+        // TODO: Query platform if it wants to handle all tap shift commands
+        // or if it wants to let us manually bit bash
+
+        return 0;
+    }
+
+    if (state->bytesReceived == 0)
+    {
+        return 0;
+    }
+
+    return -1;
+}
