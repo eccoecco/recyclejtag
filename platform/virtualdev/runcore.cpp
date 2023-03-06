@@ -52,6 +52,27 @@ bool PlatformImpl_SetSerialMode(void *platformData, enum RJCoreSerialMode mode)
     return true;
 }
 
+bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode)
+{
+    switch (mode)
+    {
+    case RJCorePortMode_HighImpedance:
+        std::cout << "Set port to high impedance\n";
+        break;
+    case RJCorePortMode_PushPull:
+        std::cout << "Set port to push pull\n";
+        break;
+    case RJCorePortMode_OpenDrain:
+        std::cout << "Set port to open drain\n";
+        break;
+    default:
+        std::cout << "Unknown port mode: " << mode << '\n';
+        return false;
+    }
+
+    return true;
+}
+
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)
 {
     int epfd = epoll_create(1);
@@ -103,6 +124,7 @@ void startRjCore(int fd)
         .currentUptime = PlatformImpl_CurrentUptime,
         .transmitData = PlatformImpl_TransmitData,
         .setSerialMode = PlatformImpl_SetSerialMode,
+        .setPortMode = PlatformImpl_SetPortMode,
     };
     PlatformData platformData{
         .fd = fd,

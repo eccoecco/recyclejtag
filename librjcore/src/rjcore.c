@@ -19,6 +19,7 @@ static int RJCoreState_Handshake(struct RJCoreState *state);
 static int RJCoreState_BinaryMode(struct RJCoreState *state);
 static int RJCoreState_SetSerialSpeed(struct RJCoreState *state);
 static int RJCoreState_AwaitAck(struct RJCoreState *state);
+static int RJCoreState_SetPortState(struct RJCoreState *state);
 
 static inline void RJCore_ChangeToState(struct RJCoreState *state, RJCoreStateCallback callback)
 {
@@ -188,6 +189,9 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
     case BusPirateCommand_UartSpeed:
         RJCore_ChangeToState(state, RJCoreState_SetSerialSpeed);
         return 1;
+    case BusPirateCommand_PortMode:
+        RJCore_ChangeToState(state, RJCoreState_SetPortState);
+        return 1;
     }
 
     // TODO: Handle binary mode commands
@@ -244,6 +248,11 @@ static int RJCoreState_AwaitAck(struct RJCoreState *state)
     int bytesProcessed = 0;
     const uint8_t *unprocessedByte = state->receiveBuffer;
 
+    // Should I actually check for this?  If some boards use a physical UART
+    // then we might be too slow, and 0xAA/0x55 might be corrupted or not received.
+    // But having said that, a lot of the high speed boards are USB CDC ACM anyway,
+    // so changing the baud rate doesn't really do much, and we won't lose data...
+
     if (state->state.serial.value == 0)
     {
         if (*unprocessedByte != 0xAA)
@@ -275,4 +284,32 @@ static int RJCoreState_AwaitAck(struct RJCoreState *state)
     }
 
     return bytesProcessed;
+}
+
+static int RJCoreState_SetPortState(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_SetPortState)
+    {
+        return 0;
+    }
+
+    if (state->bytesReceived == 0)
+    {
+        return 0;
+    }
+
+    if (state->receiveBuffer[0] >= RJCorePortMode_Size)
+    {
+        // Unknown port mode
+        return -1;
+    }
+
+    if (!(*state->platform->setPortMode)(state->privateData, state->receiveBuffer[0]))
+    {
+        return -1;
+    }
+
+    RJCore_ChangeToState(state, RJCoreState_BinaryMode);
+
+    return 1;
 }

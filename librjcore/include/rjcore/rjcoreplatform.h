@@ -33,12 +33,24 @@ enum RJCoreSerialMode
 
 typedef bool (*RJCorePlatform_SetSerialMode)(void *, enum RJCoreSerialMode);
 
+enum RJCorePortMode
+{
+    RJCorePortMode_HighImpedance = 0,
+    RJCorePortMode_PushPull = 1,
+    RJCorePortMode_OpenDrain = 2,
+    RJCorePortMode_Size,
+};
+
+// Implementation that sets the port mode
+typedef bool (*RJCorePlatform_SetPortMode)(void *, enum RJCorePortMode);
+
 /// @brief The platform implementation
 struct RJCorePlatform
 {
     RJCorePlatform_CurrentUptime currentUptime; //!< Current uptime
     RJCorePlatform_TransmitData transmitData;   //!< Used to transmit data
     RJCorePlatform_SetSerialMode setSerialMode; //!< Set the serial mode
+    RJCorePlatform_SetPortMode setPortMode;     //!< Sets the port mode
 };
 
 #ifdef __cplusplus
