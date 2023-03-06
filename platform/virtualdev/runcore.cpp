@@ -73,6 +73,34 @@ bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode)
     return true;
 }
 
+bool PlatformImpl_SetFeature(void *, enum RJCoreFeature feature, int action)
+{
+    std::string description{(action != 0) ? "on" : "off"};
+
+    if ((feature & RJCoreFeature_LED) != 0)
+    {
+        std::cout << "Feature LED: " << description << '\n';
+    }
+    if ((feature & RJCoreFeature_VReg) != 0)
+    {
+        std::cout << "Feature Vreg: " << description << '\n';
+    }
+    if ((feature & RJCoreFeature_TRst) != 0)
+    {
+        std::cout << "Feature Trst: " << description << '\n';
+    }
+    if ((feature & RJCoreFeature_SRst) != 0)
+    {
+        std::cout << "Feature Srst: " << description << '\n';
+    }
+    if ((feature & RJCoreFeature_Pullup) != 0)
+    {
+        std::cout << "Feature Pullup: " << description << '\n';
+    }
+
+    return true;
+}
+
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)
 {
     int epfd = epoll_create(1);
@@ -125,6 +153,7 @@ void startRjCore(int fd)
         .transmitData = PlatformImpl_TransmitData,
         .setSerialMode = PlatformImpl_SetSerialMode,
         .setPortMode = PlatformImpl_SetPortMode,
+        .setFeature = PlatformImpl_SetFeature,
     };
     PlatformData platformData{
         .fd = fd,

@@ -20,6 +20,7 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state);
 static int RJCoreState_SetSerialSpeed(struct RJCoreState *state);
 static int RJCoreState_AwaitAck(struct RJCoreState *state);
 static int RJCoreState_SetPortState(struct RJCoreState *state);
+static int RJCoreState_SetFeature(struct RJCoreState *state);
 
 static inline void RJCore_ChangeToState(struct RJCoreState *state, RJCoreStateCallback callback)
 {
@@ -192,6 +193,9 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
     case BusPirateCommand_PortMode:
         RJCore_ChangeToState(state, RJCoreState_SetPortState);
         return 1;
+    case BusPirateCommand_Feature:
+        RJCore_ChangeToState(state, RJCoreState_SetFeature);
+        return 1;
     }
 
     // TODO: Handle binary mode commands
@@ -203,8 +207,8 @@ static int RJCoreState_SetSerialSpeed(struct RJCoreState *state)
 {
     if (state->stateCallback != RJCoreState_SetSerialSpeed)
     {
+        state->state.serial.counter = 0;
         state->state.serial.mode = 0;
-        state->state.serial.value = 0;
         return 0;
     }
 
@@ -253,19 +257,19 @@ static int RJCoreState_AwaitAck(struct RJCoreState *state)
     // But having said that, a lot of the high speed boards are USB CDC ACM anyway,
     // so changing the baud rate doesn't really do much, and we won't lose data...
 
-    if (state->state.serial.value == 0)
+    if (state->state.serial.counter == 0)
     {
         if (*unprocessedByte != 0xAA)
         {
             return -1;
         }
 
-        ++state->state.serial.value;
+        ++state->state.serial.counter;
         ++bytesProcessed;
         ++unprocessedByte;
     }
 
-    if ((state->state.serial.value == 1) && (bytesProcessed < state->bytesReceived))
+    if ((state->state.serial.counter == 1) && (bytesProcessed < state->bytesReceived))
     {
         if (*unprocessedByte != 0x55)
         {
@@ -312,4 +316,46 @@ static int RJCoreState_SetPortState(struct RJCoreState *state)
     RJCore_ChangeToState(state, RJCoreState_BinaryMode);
 
     return 1;
+}
+
+static int RJCoreState_SetFeature(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_SetFeature)
+    {
+        state->state.feature.counter = 0;
+        state->state.feature.feature = 0;
+
+        return 0;
+    }
+
+    if (state->bytesReceived == 0)
+    {
+        return 0;
+    }
+
+    const uint8_t *buffer = state->receiveBuffer;
+    int bytesProcessed = 0;
+
+    if (state->state.feature.counter == 0)
+    {
+        state->state.feature.feature = *buffer;
+
+        ++state->state.feature.counter;
+        ++buffer;
+        ++bytesProcessed;
+    }
+
+    if ((state->state.feature.counter == 1) && (bytesProcessed < state->bytesReceived))
+    {
+        if (!(*state->platform->setFeature)(state->privateData, state->state.feature.feature, *buffer))
+        {
+            return -1;
+        }
+
+        RJCore_ChangeToState(state, RJCoreState_BinaryMode);
+
+        ++bytesProcessed;
+    }
+
+    return bytesProcessed;
 }

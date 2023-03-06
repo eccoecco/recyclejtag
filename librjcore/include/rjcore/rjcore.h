@@ -57,9 +57,14 @@ struct RJCoreState
         } handshake;
         struct
         {
+            uint8_t counter;
             uint8_t mode;
-            uint8_t value;
         } serial; //!< Used to keep track when setting serial mode
+        struct
+        {
+            uint8_t counter;
+            uint8_t feature;
+        } feature; //!< Used to keep track of what feature request is being changed
     } state;
 
     uint32_t timeSinceLastRxActivity; //!< How long since last activity time was detected

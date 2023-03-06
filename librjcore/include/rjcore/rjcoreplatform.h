@@ -44,6 +44,17 @@ enum RJCorePortMode
 // Implementation that sets the port mode
 typedef bool (*RJCorePlatform_SetPortMode)(void *, enum RJCorePortMode);
 
+enum RJCoreFeature
+{
+    RJCoreFeature_LED = 0x01,
+    RJCoreFeature_VReg = 0x02,
+    RJCoreFeature_TRst = 0x04,
+    RJCoreFeature_SRst = 0x08,
+    RJCoreFeature_Pullup = 0x10,
+};
+
+typedef bool (*RJCorePlatform_SetFeature)(void *, enum RJCoreFeature, int action);
+
 /// @brief The platform implementation
 struct RJCorePlatform
 {
@@ -51,6 +62,7 @@ struct RJCorePlatform
     RJCorePlatform_TransmitData transmitData;   //!< Used to transmit data
     RJCorePlatform_SetSerialMode setSerialMode; //!< Set the serial mode
     RJCorePlatform_SetPortMode setPortMode;     //!< Sets the port mode
+    RJCorePlatform_SetFeature setFeature;       //!< Sets features
 };
 
 #ifdef __cplusplus
