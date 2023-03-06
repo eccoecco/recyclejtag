@@ -23,7 +23,7 @@ typedef uint32_t (*RJCorePlatform_CurrentUptime)(void *);
 
 /// Implementation that transmits data over the uart.  Only returns after all data has
 /// been transmitted.
-typedef void (*RJCorePlatform_TransmitData)(void *, const char *, size_t);
+typedef void (*RJCorePlatform_TransmitData)(void *, const void *, size_t);
 
 enum RJCoreSerialMode
 {

@@ -28,7 +28,7 @@ uint32_t PlatformImpl_CurrentUptime(void *)
     return systemTime.tv_sec + systemTime.tv_nsec / 1000000;
 }
 
-void PlatformImpl_TransmitData(void *platformData, const char *buffer, size_t length)
+void PlatformImpl_TransmitData(void *platformData, const void *buffer, size_t length)
 {
     auto data = static_cast<PlatformData *>(platformData);
 
