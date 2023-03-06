@@ -101,6 +101,14 @@ bool PlatformImpl_SetFeature(void *, enum RJCoreFeature feature, int action)
     return true;
 }
 
+void PlatformImpl_ReadVoltages(void *, uint16_t *values)
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        values[i] = 0;
+    }
+}
+
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)
 {
     int epfd = epoll_create(1);
@@ -154,6 +162,7 @@ void startRjCore(int fd)
         .setSerialMode = PlatformImpl_SetSerialMode,
         .setPortMode = PlatformImpl_SetPortMode,
         .setFeature = PlatformImpl_SetFeature,
+        .readVoltages = PlatformImpl_ReadVoltages,
     };
     PlatformData platformData{
         .fd = fd,

@@ -55,6 +55,10 @@ enum RJCoreFeature
 
 typedef bool (*RJCorePlatform_SetFeature)(void *, enum RJCoreFeature, int action);
 
+// Implementation that reads the four voltages
+// TODO: Document ADC ratios etc
+typedef void (*RJCorePlatform_ReadVoltages)(void *, uint16_t *values);
+
 /// @brief The platform implementation
 struct RJCorePlatform
 {
@@ -63,6 +67,7 @@ struct RJCorePlatform
     RJCorePlatform_SetSerialMode setSerialMode; //!< Set the serial mode
     RJCorePlatform_SetPortMode setPortMode;     //!< Sets the port mode
     RJCorePlatform_SetFeature setFeature;       //!< Sets features
+    RJCorePlatform_ReadVoltages readVoltages;   //!< Reads the voltages
 };
 
 #ifdef __cplusplus

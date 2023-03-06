@@ -21,6 +21,7 @@ static int RJCoreState_SetSerialSpeed(struct RJCoreState *state);
 static int RJCoreState_AwaitAck(struct RJCoreState *state);
 static int RJCoreState_SetPortState(struct RJCoreState *state);
 static int RJCoreState_SetFeature(struct RJCoreState *state);
+static int RJCoreState_ReadVoltages(struct RJCoreState *state);
 
 static inline void RJCore_ChangeToState(struct RJCoreState *state, RJCoreStateCallback callback)
 {
@@ -196,6 +197,9 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
     case BusPirateCommand_Feature:
         RJCore_ChangeToState(state, RJCoreState_SetFeature);
         return 1;
+    case BusPirateCommand_ReadADCs:
+        RJCore_ChangeToState(state, RJCoreState_ReadVoltages);
+        return 1;
     }
 
     // TODO: Handle binary mode commands
@@ -359,3 +363,36 @@ static int RJCoreState_SetFeature(struct RJCoreState *state)
 
     return bytesProcessed;
 }
+
+static int RJCoreState_ReadVoltages(struct RJCoreState *state)
+{
+    if (state->stateCallback != RJCoreState_ReadVoltages)
+    {
+        return 0;
+    }
+
+    uint8_t result[10];
+    uint16_t voltages[4];
+
+    (*state->platform->readVoltages)(state->privateData, voltages);
+
+    result[0] = BusPirateCommand_ReadADCs;
+    result[1] = 8; // This constant is what the Bus Pirate firmware provides
+
+    uint8_t *dest = result + 2;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        *dest = (voltages[i] >> 8) & 0xFF;
+        ++dest;
+        *dest = (voltages[i] & 0xFF);
+        ++dest;
+    }
+
+    (*state->platform->transmitData)(state->privateData, result, 10);
+
+    RJCore_ChangeToState(state, RJCoreState_BinaryMode);
+
+    return 0;
+}
+
