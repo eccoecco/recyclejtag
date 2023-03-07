@@ -34,13 +34,7 @@ struct RJCoreStateData
         } serial; //!< Used to keep track when setting serial mode
         struct
         {
-            uint8_t counter;
-            uint8_t feature;
-        } feature; //!< Used to keep track of what feature request is being changed
-        struct
-        {
             uint16_t bitsToShift;
-            uint8_t counter;
         } tapShift;
     } state;
 };

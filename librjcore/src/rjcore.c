@@ -15,21 +15,14 @@ enum BusPirateCommand
     BusPirateCommand_JtagSpeed = 0x08,
 };
 
-#if 0
-static int RJCoreState_SetSerialSpeed(struct RJCoreState *state);
-static int RJCoreState_AwaitAck(struct RJCoreState *state);
-static int RJCoreState_SetPortState(struct RJCoreState *state);
-static int RJCoreState_SetFeature(struct RJCoreState *state);
-static int RJCoreState_ReadVoltages(struct RJCoreState *state);
-static int RJCoreState_InitTapShift(struct RJCoreState *state);
-static int RJCoreState_ExecuteTapShift(struct RJCoreState *state);
-#endif
-
 static void RJCoreState_Handshake_Enter(struct RJCoreHandle *);
 static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_SetSerialSpeed_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_AwaitSerialAck_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_SetPortMode_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_SetFeatures_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_ReadVoltages_Process(struct RJCoreHandle *, const uint8_t *, int);
 
 static struct RJCoreStateDescription RJCoreState_Handshake = {
     .stateEnter = RJCoreState_Handshake_Enter,
@@ -50,6 +43,21 @@ static struct RJCoreStateDescription RJCoreState_AwaitSerialAck = {
     .stateEnter = NULL,
     .stateProcess = RJCoreState_AwaitSerialAck_Process,
     .bytesRequired = 2,
+};
+static struct RJCoreStateDescription RJCoreState_SetPortMode = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_SetPortMode_Process,
+    .bytesRequired = 1,
+};
+static struct RJCoreStateDescription RJCoreState_SetFeatures = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_SetFeatures_Process,
+    .bytesRequired = 2,
+};
+static struct RJCoreStateDescription RJCoreState_ReadVoltages = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_ReadVoltages_Process,
+    .bytesRequired = 0,
 };
 
 static inline void RJCore_ChangeToState(struct RJCoreHandle *handle, const struct RJCoreStateDescription *state)
@@ -276,19 +284,27 @@ static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandl
                 .bytesProcessed = 0,
                 .nextState = &RJCoreState_SetSerialSpeed,
             };
+        case BusPirateCommand_PortMode:
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_SetPortMode,
+            };
+        case BusPirateCommand_Feature:
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_SetFeatures,
+            };
+        case BusPirateCommand_ReadADCs:
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_ReadVoltages,
+            };
 #if 0
-    case BusPirateCommand_PortMode:
-        RJCore_ChangeToState(state, RJCoreState_SetPortState);
-        return 1;
-    case BusPirateCommand_Feature:
-        RJCore_ChangeToState(state, RJCoreState_SetFeature);
-        return 1;
-    case BusPirateCommand_ReadADCs:
-        RJCore_ChangeToState(state, RJCoreState_ReadVoltages);
-        return 1;
-    case BusPirateCommand_TapShift:
-        RJCore_ChangeToState(state, RJCoreState_InitTapShift);
-        return 1;
+        case BusPirateCommand_TapShift:
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_StartTapShift,
+            };
 #endif
         }
     }
@@ -358,89 +374,59 @@ static struct RJCoreStateReply RJCoreState_AwaitSerialAck_Process(struct RJCoreH
     };
 }
 
-#if 0
-
-static int RJCoreState_SetPortState(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_SetPortMode_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                               int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_SetPortState)
+    if ((bytesAvailable == 1) && (*data < RJCorePortMode_Size))
     {
-        return 0;
-    }
-
-    if (state->bytesReceived == 0)
-    {
-        return 0;
-    }
-
-    if (state->receiveBuffer[0] >= RJCorePortMode_Size)
-    {
-        // Unknown port mode
-        return -1;
-    }
-
-    if (!(*state->platform->setPortMode)(state->privateData, state->receiveBuffer[0]))
-    {
-        return -1;
-    }
-
-    RJCore_ChangeToState(state, RJCoreState_BinaryMode);
-
-    return 1;
-}
-
-static int RJCoreState_SetFeature(struct RJCoreState *state)
-{
-    if (state->stateCallback != RJCoreState_SetFeature)
-    {
-        state->state.feature.counter = 0;
-        state->state.feature.feature = 0;
-
-        return 0;
-    }
-
-    if (state->bytesReceived == 0)
-    {
-        return 0;
-    }
-
-    const uint8_t *buffer = state->receiveBuffer;
-    int bytesProcessed = 0;
-
-    if (state->state.feature.counter == 0)
-    {
-        state->state.feature.feature = *buffer;
-
-        ++state->state.feature.counter;
-        ++buffer;
-        ++bytesProcessed;
-    }
-
-    if ((state->state.feature.counter == 1) && (bytesProcessed < state->bytesReceived))
-    {
-        if (!(*state->platform->setFeature)(state->privateData, state->state.feature.feature, *buffer))
+        if ((*handle->platform->setPortMode)(handle->privateData, *data))
         {
-            return -1;
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_BinaryMode,
+            };
         }
-
-        RJCore_ChangeToState(state, RJCoreState_BinaryMode);
-
-        ++bytesProcessed;
     }
 
-    return bytesProcessed;
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
 }
 
-static int RJCoreState_ReadVoltages(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_SetFeatures_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                               int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_ReadVoltages)
+    if (bytesAvailable == 2)
     {
-        return 0;
+        uint8_t feature = data[0];
+        uint8_t action = data[1];
+
+        if ((*handle->platform->setFeature)(handle->privateData, feature, action))
+        {
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_BinaryMode,
+            };
+        }
     }
+
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
+}
+
+static struct RJCoreStateReply RJCoreState_ReadVoltages_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                int bytesAvailable)
+{
+    (void)data;
+    (void)bytesAvailable;
 
     uint8_t result[10];
     uint16_t voltages[4];
 
-    (*state->platform->readVoltages)(state->privateData, voltages);
+    (*handle->platform->readVoltages)(handle->privateData, voltages);
 
     result[0] = BusPirateCommand_ReadADCs;
     result[1] = 8; // This constant is what the Bus Pirate firmware provides
@@ -455,12 +441,15 @@ static int RJCoreState_ReadVoltages(struct RJCoreState *state)
         ++dest;
     }
 
-    (*state->platform->transmitData)(state->privateData, result, 10);
+    (*handle->platform->transmitData)(handle->privateData, result, 10);
 
-    RJCore_ChangeToState(state, RJCoreState_BinaryMode);
-
-    return 0;
+    return (struct RJCoreStateReply){
+        .bytesProcessed = 0,
+        .nextState = &RJCoreState_BinaryMode,
+    };
 }
+
+#if 0
 
 static int RJCoreState_InitTapShift(struct RJCoreState *state)
 {
