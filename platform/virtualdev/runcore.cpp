@@ -155,7 +155,7 @@ void startRjCore(int fd)
         return;
     }
 
-    RJCoreState rjcore;
+    RJCoreHandle rjcoreHandle;
     RJCorePlatform platform{
         .currentUptime = PlatformImpl_CurrentUptime,
         .transmitData = PlatformImpl_TransmitData,
@@ -168,7 +168,7 @@ void startRjCore(int fd)
         .fd = fd,
     };
 
-    RJCore_Init(&rjcore, &platform, &platformData);
+    RJCore_Init(&rjcoreHandle, &platform, &platformData);
 
     while (true)
     {
@@ -206,6 +206,6 @@ void startRjCore(int fd)
             break;
         }
 
-        RJCore_NotifyDataReceived(&rjcore, buffer.data(), bytesRead);
+        RJCore_NotifyDataReceived(&rjcoreHandle, buffer.data(), bytesRead);
     }
 }

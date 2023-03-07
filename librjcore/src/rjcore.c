@@ -15,8 +15,7 @@ enum BusPirateCommand
     BusPirateCommand_JtagSpeed = 0x08,
 };
 
-static int RJCoreState_Handshake(struct RJCoreState *state);
-static int RJCoreState_BinaryMode(struct RJCoreState *state);
+#if 0
 static int RJCoreState_SetSerialSpeed(struct RJCoreState *state);
 static int RJCoreState_AwaitAck(struct RJCoreState *state);
 static int RJCoreState_SetPortState(struct RJCoreState *state);
@@ -24,175 +23,260 @@ static int RJCoreState_SetFeature(struct RJCoreState *state);
 static int RJCoreState_ReadVoltages(struct RJCoreState *state);
 static int RJCoreState_InitTapShift(struct RJCoreState *state);
 static int RJCoreState_ExecuteTapShift(struct RJCoreState *state);
+#endif
 
-static inline void RJCore_ChangeToState(struct RJCoreState *state, RJCoreStateCallback callback)
+static void RJCoreState_Handshake_Enter(struct RJCoreHandle *);
+static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_SetSerialSpeed_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_AwaitSerialAck_Process(struct RJCoreHandle *, const uint8_t *, int);
+
+static struct RJCoreStateDescription RJCoreState_Handshake = {
+    .stateEnter = RJCoreState_Handshake_Enter,
+    .stateProcess = RJCoreState_Handshake_Process,
+    .bytesRequired = -1,
+};
+static struct RJCoreStateDescription RJCoreState_BinaryMode = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_BinaryMode_Process,
+    .bytesRequired = 1,
+};
+static struct RJCoreStateDescription RJCoreState_SetSerialSpeed = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_SetSerialSpeed_Process,
+    .bytesRequired = 1,
+};
+static struct RJCoreStateDescription RJCoreState_AwaitSerialAck = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_AwaitSerialAck_Process,
+    .bytesRequired = 2,
+};
+
+static inline void RJCore_ChangeToState(struct RJCoreHandle *handle, const struct RJCoreStateDescription *state)
 {
-    // Each state gets notified that it is entering this state.
-    (*callback)(state);
+    if (state->bytesRequired > RJCORE_STATE_MAXIMUM_BUFFERED_BYTES)
+    {
+        // Oh no - can't have this - internal bug!  Just go reset.
+        // TODO: Notify the platform that an internal error occurred
+        state = &RJCoreState_Handshake;
+    }
 
-    state->stateCallback = callback;
+    handle->currentState = state;
+    handle->buffered.bytesValid = 0;
+
+    if (state->stateEnter != NULL)
+    {
+        (*state->stateEnter)(handle);
+    }
 }
 
-void RJCore_Init(struct RJCoreState *state, struct RJCorePlatform *platform, void *privateData)
+void RJCore_Init(struct RJCoreHandle *handle, struct RJCorePlatform *platform, void *privateData)
 {
-    memset(state, 0, sizeof(*state));
+    memset(handle, 0, sizeof(*handle));
 
-    state->platform = platform;
-    state->privateData = privateData;
+    handle->platform = platform;
+    handle->privateData = privateData;
 
-    RJCore_ChangeToState(state, RJCoreState_Handshake);
+    RJCore_ChangeToState(handle, &RJCoreState_Handshake);
 }
 
-void RJCore_NotifyDataReceived(struct RJCoreState *state, const uint8_t *data, size_t bytesReceived)
+static void RJCore_CheckIdleTime(struct RJCoreHandle *handle, size_t bytesReceived)
 {
-    uint32_t currentTime = state->platform->currentUptime(state->privateData);
+    uint32_t currentTime = (*handle->platform->currentUptime)(handle->privateData);
 
     if (bytesReceived > 0)
     {
-        state->timeSinceLastRxActivity = 0;
-        state->lastRxActivityTime = currentTime;
+        handle->lastRxActivityTime = currentTime;
     }
-    else
+    else if (handle->currentState != &RJCoreState_Handshake)
     {
-        state->timeSinceLastRxActivity = currentTime - state->lastRxActivityTime;
+        uint32_t idleTime = currentTime - handle->lastRxActivityTime;
+
+        if (idleTime >= RJCORE_UART_IDLE_TIMEOUT)
+        {
+            // Took too long to receive any data, just reset.
+            RJCore_ChangeToState(handle, &RJCoreState_Handshake);
+        }
     }
-
-    do
-    {
-        int bytesProcessed;
-        bool resetToInit = false;
-
-        RJCoreStateCallback currentCallback = state->stateCallback;
-        state->bytesReceived = bytesReceived;
-        state->receiveBuffer = data;
-
-        bytesProcessed = state->stateCallback(state);
-        if (bytesProcessed < 0)
-        {
-            resetToInit = true;
-        }
-        else if (bytesProcessed == 0)
-        {
-            // bytesReceived == 0, if checking for timeout
-            if ((bytesReceived > 0) && (state->stateCallback == currentCallback))
-            {
-                // Why is this state not processing any data and remaining in the current
-                // state?  This is considered an internal bug, but I don't want to lock up
-                // the system, so just reset back to init.
-                resetToInit = true;
-            }
-        }
-        else if (bytesProcessed > (int)bytesReceived)
-        {
-            // How can you process more data than was received?!
-            resetToInit = true;
-        }
-        else
-        {
-            bytesReceived -= bytesProcessed;
-            data += bytesProcessed;
-        }
-
-        if (resetToInit)
-        {
-            // Reset state callback to null, so that the handshake state thinks
-            // that it's entering a fresh state.
-            state->stateCallback = NULL;
-            RJCore_ChangeToState(state, RJCoreState_Handshake);
-
-            bytesReceived = 0;
-        }
-
-    } while (bytesReceived > 0);
 }
 
-static int RJCoreState_Handshake(struct RJCoreState *state)
+static int RJCore_CopyDataToBuffer(struct RJCoreHandle *handle, const uint8_t *data, int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_Handshake)
+    int totalBytesRequired = handle->currentState->bytesRequired;
+    int bytesToCopy;
+
+    if ((bytesAvailable == 0) || (totalBytesRequired <= 0))
     {
-        // Entering this state, so just clear our state
-        state->state.handshake.validBytes = 0;
-        // Reset UART to 115,200
-        (*state->platform->setSerialMode)(state->privateData, RJCoreSerialMode_Normal);
+        // Either no data available, or the state is requesting as much data as available (< 0),
+        // or not needing any data at all (== 0)
         return 0;
     }
 
-    // If nothing has happened for a while, reset everything
-    if (state->timeSinceLastRxActivity > RJCORE_TIMEOUT_HANDSHAKE)
+    bytesToCopy = totalBytesRequired - handle->buffered.bytesValid;
+
+    if (bytesToCopy > bytesAvailable)
     {
-        state->state.handshake.validBytes = 0;
+        bytesToCopy = bytesAvailable;
     }
 
+    for (int offset = 0; offset < bytesToCopy; ++offset)
+    {
+        handle->buffered.data[handle->buffered.bytesValid + offset] = data[offset];
+    }
+
+    handle->buffered.bytesValid += bytesToCopy;
+
+    return bytesToCopy;
+}
+
+static int RJCore_ProcessState(struct RJCoreHandle *handle, const uint8_t *data, int bytesAvailable)
+{
+    struct RJCoreStateReply reply;
+
+    reply = (*handle->currentState->stateProcess)(handle, data, bytesAvailable);
+
+    // Always clear buffered data after completion, so that a state can keep on requesting
+    // more data for itself
+    handle->buffered.bytesValid = 0;
+
+    if (reply.bytesProcessed == -1)
+    {
+        // Oh no!  Failure!
+        RJCore_ChangeToState(handle, &RJCoreState_Handshake);
+    }
+    else if (reply.nextState != NULL)
+    {
+        RJCore_ChangeToState(handle, reply.nextState);
+    }
+
+    return reply.bytesProcessed;
+}
+
+void RJCore_NotifyDataReceived(struct RJCoreHandle *handle, const uint8_t *data, int bytesReceived)
+{
+    const struct RJCoreStateDescription *startingState;
+
+    RJCore_CheckIdleTime(handle, bytesReceived);
+
+    do
+    {
+        startingState = handle->currentState;
+
+        // If this state needs a certain number of bytes in the buffer before
+        // entering, then see if that's available
+        if (startingState->bytesRequired > 0)
+        {
+            int bytesProcessed = RJCore_CopyDataToBuffer(handle, data, bytesReceived);
+
+            data += bytesProcessed;
+            bytesReceived -= bytesProcessed;
+
+            if (handle->buffered.bytesValid < startingState->bytesRequired)
+            {
+                continue;
+            }
+
+            // Can ignore return value of bytes processed, since we've already taken the
+            // data from data/bytesReceived, and put them into the buffered data
+            RJCore_ProcessState(handle, handle->buffered.data, handle->buffered.bytesValid);
+        }
+        else
+        {
+            // Either no data was requested, or as much data as possible.  Either way, should
+            // be valid to pass the raw data across.
+            int bytesProcessed = RJCore_ProcessState(handle, data, bytesReceived);
+
+            data += bytesProcessed;
+            bytesReceived -= bytesProcessed;
+        }
+
+        // Keep looping if there's still data to process.
+        // If there's no more data, only keep looping if the state machine keeps changing state.
+        // Once the state machine stays still, no point looping (can accidentally cause infinite loop otherwise)
+    } while ((bytesReceived > 0) || (startingState != handle->currentState));
+}
+
+static void RJCoreState_Handshake_Enter(struct RJCoreHandle *handle)
+{
+    handle->stateData.generic.value = 0; // Use this as a counter for the number of zeroes received
+    (*handle->platform->setSerialMode)(handle->privateData, RJCoreSerialMode_Normal);
+}
+
+static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                             int bytesAvailable)
+{
     int bytesProcessed;
 
-    for (bytesProcessed = 0; bytesProcessed < state->bytesReceived; ++bytesProcessed)
+    for (bytesProcessed = 0; bytesProcessed < bytesAvailable; ++bytesProcessed, ++data)
     {
-        switch (state->receiveBuffer[bytesProcessed])
+        switch (*data)
         {
         case BusPirateCommand_Unknown:
             // Bus Pirate says that it should only send a response after 20 consecutive zeroes
             // but that errant zeroes can happen (e.g. during startup), so it is possible that
             // more than 20 consecutive zeroes come streaming in
-            if (state->state.handshake.validBytes < 20)
+            if (handle->stateData.generic.value < 20)
             {
-                ++state->state.handshake.validBytes;
+                ++handle->stateData.generic.value;
 
-                if (state->state.handshake.validBytes == 20)
+                if (handle->stateData.generic.value == 20)
                 {
                     // Send the Bus Pirate identifier
-                    (*state->platform->transmitData)(state->privateData, "BBIO1", 5);
+                    (*handle->platform->transmitData)(handle->privateData, "BBIO1", 5);
                 }
             }
             // Okay to keep on receiving lots of zeroes - it might be that some were errant
             break;
         case BusPirateCommand_EnterOpenOCD:
-            if (state->state.handshake.validBytes == 20)
+            if (handle->stateData.generic.value == 20)
             {
-                (*state->platform->transmitData)(state->privateData, "OCD1", 4);
-                RJCore_ChangeToState(state, RJCoreState_BinaryMode);
-                // +1, have processed the current byte
-                return bytesProcessed + 1;
+                (*handle->platform->transmitData)(handle->privateData, "OCD1", 4);
+
+                return (struct RJCoreStateReply){
+                    .bytesProcessed = bytesProcessed + 1, // +1, have processed the current byte
+                    .nextState = &RJCoreState_BinaryMode,
+                };
             }
             else
             {
-                return -1;
+                return (struct RJCoreStateReply){
+                    .bytesProcessed = -1,
+                    .nextState = NULL,
+                };
             }
             break;
         default:
             // Don't know how to handle this command - just reset to initial state so that
             // we don't get into an odd state
-            return -1;
+            return (struct RJCoreStateReply){
+                .bytesProcessed = -1,
+                .nextState = NULL,
+            };
         }
     }
 
-    // Maybe more zeroes are coming in future?
-    return bytesProcessed;
+    return (struct RJCoreStateReply){
+        .bytesProcessed = bytesProcessed,
+        .nextState = NULL,
+    };
 }
 
-static int RJCoreState_BinaryMode(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                              int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_BinaryMode)
-    {
-        // Entering this state
-        return 0;
-    }
+    (void)handle;
 
-    // If nothing has happened for a while, go back to handshake mode
-    if (state->timeSinceLastRxActivity > RJCORE_TIMEOUT_BINARY_MODE)
+    // bytesAvailable should be equal to 1, since the state description requested exactly 1 byte
+    if (bytesAvailable == 1)
     {
-        return -1;
-    }
-
-    if (state->bytesReceived == 0)
-    {
-        return 0;
-    }
-
-    switch (state->receiveBuffer[0])
-    {
-    case BusPirateCommand_UartSpeed:
-        RJCore_ChangeToState(state, RJCoreState_SetSerialSpeed);
-        return 1;
+        switch (*data)
+        {
+        case BusPirateCommand_UartSpeed:
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_SetSerialSpeed,
+            };
+#if 0
     case BusPirateCommand_PortMode:
         RJCore_ChangeToState(state, RJCoreState_SetPortState);
         return 1;
@@ -205,99 +289,76 @@ static int RJCoreState_BinaryMode(struct RJCoreState *state)
     case BusPirateCommand_TapShift:
         RJCore_ChangeToState(state, RJCoreState_InitTapShift);
         return 1;
+#endif
+        }
     }
 
-    // TODO: Handle binary mode commands
-
-    return -1;
+    // Don't know how to handle other commands
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
 }
 
-static int RJCoreState_SetSerialSpeed(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_SetSerialSpeed_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                  int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_SetSerialSpeed)
+    if (bytesAvailable == 1)
     {
-        state->state.serial.counter = 0;
-        state->state.serial.mode = 0;
-        return 0;
+        uint8_t mode = *data;
+
+        if ((*handle->platform->setSerialMode)(handle->privateData, mode))
+        {
+            handle->stateData.state.serial.mode = mode;
+
+            // Successfully changed baud rate - go wait for the ack
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_AwaitSerialAck,
+            };
+        }
     }
 
-    if (state->bytesReceived == 0)
-    {
-        return 0;
-    }
-
-    uint8_t newMode = state->receiveBuffer[0];
-    state->state.serial.mode = newMode;
-
-    if (!(*state->platform->setSerialMode)(state->privateData, newMode))
-    {
-        // Unable to support requested serial port mode
-        return -1;
-    }
-
-    RJCore_ChangeToState(state, RJCoreState_AwaitAck);
-
-    return 1;
+    // Unable to support requested serial port mode (or missing data)
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
 }
 
-static int RJCoreState_AwaitAck(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_AwaitSerialAck_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                  int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_AwaitAck)
-    {
-        return 0;
-    }
-
-    if (state->timeSinceLastRxActivity >= RJCORE_TIMEOUT_SERIAL_MODE_ACK)
-    {
-        // Timed out!  Just go back to handshake mode
-        return -1;
-    }
-
-    if (state->bytesReceived == 0)
-    {
-        return 0;
-    }
-
-    int bytesProcessed = 0;
-    const uint8_t *unprocessedByte = state->receiveBuffer;
-
     // Should I actually check for this?  If some boards use a physical UART
     // then we might be too slow, and 0xAA/0x55 might be corrupted or not received.
     // But having said that, a lot of the high speed boards are USB CDC ACM anyway,
     // so changing the baud rate doesn't really do much, and we won't lose data...
 
-    if (state->state.serial.counter == 0)
+    if (bytesAvailable == 2)
     {
-        if (*unprocessedByte != 0xAA)
+        if ((data[0] == 0xAA) && (data[1] == 0x55))
         {
-            return -1;
-        }
+            uint8_t reply[2] = {
+                BusPirateCommand_UartSpeed,
+                handle->stateData.state.serial.mode,
+            };
 
-        ++state->state.serial.counter;
-        ++bytesProcessed;
-        ++unprocessedByte;
+            (*handle->platform->transmitData)(handle->privateData, reply, 2);
+
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_BinaryMode,
+            };
+        }
     }
 
-    if ((state->state.serial.counter == 1) && (bytesProcessed < state->bytesReceived))
-    {
-        if (*unprocessedByte != 0x55)
-        {
-            return -1;
-        }
-
-        char reply[2] = {
-            BusPirateCommand_UartSpeed,
-            state->state.serial.mode,
-        };
-
-        (*state->platform->transmitData)(state->privateData, reply, 2);
-
-        RJCore_ChangeToState(state, RJCoreState_BinaryMode);
-        ++bytesProcessed;
-    }
-
-    return bytesProcessed;
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
 }
+
+#if 0
 
 static int RJCoreState_SetPortState(struct RJCoreState *state)
 {
@@ -470,3 +531,5 @@ static int RJCoreState_ExecuteTapShift(struct RJCoreState *state)
 
     return -1;
 }
+
+#endif

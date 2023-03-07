@@ -1,7 +1,7 @@
 /**
 
     @file rjcore/rjcoreevent.h
-    @brief Recycle JTAG Core platform implementation
+    @brief Functions that platforms must provide to run the Recycle JTAG Core.
 
 */
 
