@@ -34,7 +34,7 @@ struct RJCoreStateData
         } serial; //!< Used to keep track when setting serial mode
         struct
         {
-            uint16_t bitsToShift;
+            int bitsToShift;
         } tapShift;
     } state;
 };

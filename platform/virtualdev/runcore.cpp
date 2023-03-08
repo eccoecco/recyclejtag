@@ -109,6 +109,13 @@ void PlatformImpl_ReadVoltages(void *, uint16_t *values)
     }
 }
 
+int PlatformImpl_TapShiftGPIOClock(int tdi, int tms)
+{
+    (void)tdi;
+    (void)tms;
+    return 0;
+}
+
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)
 {
     int epfd = epoll_create(1);
@@ -157,12 +164,14 @@ void startRjCore(int fd)
 
     RJCoreHandle rjcoreHandle;
     RJCorePlatform platform{
+        .tapShiftMode = RJCoreTapShiftMode_GPIO,
         .currentUptime = PlatformImpl_CurrentUptime,
         .transmitData = PlatformImpl_TransmitData,
         .setSerialMode = PlatformImpl_SetSerialMode,
         .setPortMode = PlatformImpl_SetPortMode,
         .setFeature = PlatformImpl_SetFeature,
         .readVoltages = PlatformImpl_ReadVoltages,
+        .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
     };
     PlatformData platformData{
         .fd = fd,

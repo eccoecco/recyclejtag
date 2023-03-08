@@ -59,15 +59,30 @@ typedef bool (*RJCorePlatform_SetFeature)(void *, enum RJCoreFeature, int action
 // TODO: Document ADC ratios etc
 typedef void (*RJCorePlatform_ReadVoltages)(void *, uint16_t *values);
 
+enum RJCoreTapShiftMode
+{
+    RJCoreTapShiftMode_GPIO,     //!< Jtag done via manual bit bashing
+    RJCoreTapShiftMode_Callback, //!< Jtag done with packets of data via callback
+    RJCoreTapShiftMode_Custom,   //!< Assume full control of the Jtag mechanism
+};
+
+// Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
+// Returns 0 if TDO low, 1 if TDO high
+typedef int (*RJCorePlatform_GPIOClockCycle)(int tdi, int tms);
+
 /// @brief The platform implementation
 struct RJCorePlatform
 {
+    enum RJCoreTapShiftMode tapShiftMode; //!< Tells us which tap shift callback to use
+
     RJCorePlatform_CurrentUptime currentUptime; //!< Current uptime
     RJCorePlatform_TransmitData transmitData;   //!< Used to transmit data
     RJCorePlatform_SetSerialMode setSerialMode; //!< Set the serial mode
     RJCorePlatform_SetPortMode setPortMode;     //!< Sets the port mode
     RJCorePlatform_SetFeature setFeature;       //!< Sets features
     RJCorePlatform_ReadVoltages readVoltages;   //!< Reads the voltages
+
+    RJCorePlatform_GPIOClockCycle tapShiftGPIO; //!< Executes one clock of the tap shift
 };
 
 #ifdef __cplusplus

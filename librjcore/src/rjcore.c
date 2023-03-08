@@ -23,6 +23,9 @@ static struct RJCoreStateReply RJCoreState_AwaitSerialAck_Process(struct RJCoreH
 static struct RJCoreStateReply RJCoreState_SetPortMode_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_SetFeatures_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_ReadVoltages_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_TapShiftInitialise_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_TapShiftPlatform_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHandle *, const uint8_t *, int);
 
 static struct RJCoreStateDescription RJCoreState_Handshake = {
     .stateEnter = RJCoreState_Handshake_Enter,
@@ -58,6 +61,21 @@ static struct RJCoreStateDescription RJCoreState_ReadVoltages = {
     .stateEnter = NULL,
     .stateProcess = RJCoreState_ReadVoltages_Process,
     .bytesRequired = 0,
+};
+static struct RJCoreStateDescription RJCoreState_TapShiftInitialise = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_TapShiftInitialise_Process,
+    .bytesRequired = 2,
+};
+static struct RJCoreStateDescription RJCoreState_TapShiftPlatform = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_TapShiftPlatform_Process,
+    .bytesRequired = -1,
+};
+static struct RJCoreStateDescription RJCoreState_TapShiftGPIO = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_TapShiftGPIO_Process,
+    .bytesRequired = 2,
 };
 
 static inline void RJCore_ChangeToState(struct RJCoreHandle *handle, const struct RJCoreStateDescription *state)
@@ -299,13 +317,11 @@ static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandl
                 .bytesProcessed = 0,
                 .nextState = &RJCoreState_ReadVoltages,
             };
-#if 0
         case BusPirateCommand_TapShift:
             return (struct RJCoreStateReply){
                 .bytesProcessed = 0,
-                .nextState = &RJCoreState_StartTapShift,
+                .nextState = &RJCoreState_TapShiftInitialise,
             };
-#endif
         }
     }
 
@@ -449,76 +465,93 @@ static struct RJCoreStateReply RJCoreState_ReadVoltages_Process(struct RJCoreHan
     };
 }
 
-#if 0
-
-static int RJCoreState_InitTapShift(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_TapShiftInitialise_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                      int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_InitTapShift)
+    if (bytesAvailable == 2)
     {
-        state->state.tapShift.bitsToShift = 0;
-        state->state.tapShift.counter = 0;
-
-        return 0;
-    }
-
-    int bytesProcessed = 0;
-    const uint8_t *buffer = state->receiveBuffer;
-
-    while (state->state.tapShift.counter < 2)
-    {
-        if (bytesProcessed >= state->bytesReceived)
-        {
-            break;
-        }
-
-        state->state.tapShift.bitsToShift <<= 8;
-        state->state.tapShift.bitsToShift += *buffer;
-
-        ++state->state.tapShift.counter;
-        ++bytesProcessed;
-        ++buffer;
-    }
-
-    if (state->state.tapShift.counter == 2)
-    {
+        int bitsToShift = (data[0] << 8) | data[1];
         uint8_t reply[3];
-        reply[0] = BusPirateCommand_TapShift;
 
-        if (state->state.tapShift.bitsToShift > RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT)
+        if (bitsToShift > RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT)
         {
-            state->state.tapShift.bitsToShift = RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT;
+            bitsToShift = RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT;
         }
 
-        // Bus Pirate proper echoes back what was received, but this sends back the actual bits shifted
-        // just to determine the limit.  It doesn't actually matter, though, because OpenOCD ignores the
-        // reply... I could just fill this with 0s.
-        reply[1] = (state->state.tapShift.bitsToShift >> 8) & 0xFF;
-        reply[2] = state->state.tapShift.bitsToShift & 0xFF;
+        handle->stateData.state.tapShift.bitsToShift = bitsToShift;
 
-        (*state->platform->transmitData)(state->privateData, reply, 3);
+        reply[0] = BusPirateCommand_TapShift;
+        reply[1] = (bitsToShift >> 8) & 0xFF;
+        reply[2] = bitsToShift & 0xFF;
 
-        RJCore_ChangeToState(state, RJCoreState_ExecuteTapShift);
+        (*handle->platform->transmitData)(handle->privateData, reply, 3);
+
+        return (struct RJCoreStateReply){
+            .bytesProcessed = 0,
+            .nextState = (handle->platform->tapShiftMode == RJCoreTapShiftMode_GPIO) ? &RJCoreState_TapShiftGPIO
+                                                                                     : &RJCoreState_TapShiftPlatform,
+        };
     }
 
-    return bytesProcessed;
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
 }
 
-static int RJCoreState_ExecuteTapShift(struct RJCoreState *state)
+static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                int bytesAvailable)
 {
-    if (state->stateCallback != RJCoreState_ExecuteTapShift)
+    if (bytesAvailable == 2)
     {
-        // TODO: Query platform if it wants to handle all tap shift commands
-        // or if it wants to let us manually bit bash
+        int bitsToToggle = 8;
+        uint8_t tdi = data[0];
+        uint8_t tms = data[1];
+        uint8_t tdo = 0;
 
-        return 0;
+        if (handle->stateData.state.tapShift.bitsToShift < 8)
+        {
+            bitsToToggle = handle->stateData.state.tapShift.bitsToShift;
+        }
+
+        for (int bitIndex = 0; bitIndex < bitsToToggle; ++bitIndex)
+        {
+            tdo |= (*handle->platform->tapShiftGPIO)(tdi & 1, tms & 1) ? 0x80 : 0x00;
+
+            tdi >>= 1;
+            tms >>= 1;
+        }
+
+        tdo >>= (8 - bitsToToggle);
+        (*handle->platform->transmitData)(handle->privateData, &tdo, 1);
+
+        handle->stateData.state.tapShift.bitsToShift -= bitsToToggle;
     }
 
-    if (state->bytesReceived == 0)
+    if (handle->stateData.state.tapShift.bitsToShift == 0)
     {
-        return 0;
+        // All done!  Back to the binary mode selection
+        return (struct RJCoreStateReply){
+            .bytesProcessed = 0,
+            .nextState = &RJCoreState_BinaryMode,
+        };
     }
 
-    return -1;
+    return (struct RJCoreStateReply){
+        .bytesProcessed = 0,
+        .nextState = NULL,
+    };
 }
 
-#endif
+static struct RJCoreStateReply RJCoreState_TapShiftPlatform_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                    int bytesAvailable)
+{
+    (void)handle;
+    (void)data;
+    (void)bytesAvailable;
+
+    return (struct RJCoreStateReply){
+        .bytesProcessed = -1,
+        .nextState = NULL,
+    };
+}
