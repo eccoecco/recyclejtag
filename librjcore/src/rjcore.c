@@ -480,6 +480,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftInitialise_Process(struct RJC
 
         handle->stateData.state.tapShift.bitsToShift = bitsToShift;
 
+        if (handle->platform->newTapShift)
+        {
+            (*handle->platform->newTapShift)(handle->privateData, bitsToShift);
+        }
+
         reply[0] = BusPirateCommand_TapShift;
         reply[1] = (bitsToShift >> 8) & 0xFF;
         reply[2] = bitsToShift & 0xFF;
@@ -516,7 +521,7 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 
         for (int bitIndex = 0; bitIndex < bitsToToggle; ++bitIndex)
         {
-            tdo |= (*handle->platform->tapShiftGPIO)(tdi & 1, tms & 1) ? 0x80 : 0x00;
+            tdo |= (*handle->platform->tapShiftGPIO)(handle->privateData, tdi & 1, tms & 1) ? 0x80 : 0x00;
 
             tdi >>= 1;
             tms >>= 1;
@@ -546,12 +551,12 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 static struct RJCoreStateReply RJCoreState_TapShiftPlatform_Process(struct RJCoreHandle *handle, const uint8_t *data,
                                                                     int bytesAvailable)
 {
-    (void)handle;
-    (void)data;
-    (void)bytesAvailable;
+    int result;
+
+    result = (*handle->platform->tapShiftPacket)(handle->privateData, data, bytesAvailable);
 
     return (struct RJCoreStateReply){
-        .bytesProcessed = -1,
-        .nextState = NULL,
+        .bytesProcessed = (result == 0) ? bytesAvailable : result,
+        .nextState = (result > 0) ? &RJCoreState_BinaryMode : NULL,
     };
 }

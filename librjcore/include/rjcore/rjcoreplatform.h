@@ -59,16 +59,32 @@ typedef bool (*RJCorePlatform_SetFeature)(void *, enum RJCoreFeature, int action
 // TODO: Document ADC ratios etc
 typedef void (*RJCorePlatform_ReadVoltages)(void *, uint16_t *values);
 
+typedef void (*RJCorePlatform_NewTapShift)(void *, int totalBitsToShift);
+
 enum RJCoreTapShiftMode
 {
-    RJCoreTapShiftMode_GPIO,     //!< Jtag done via manual bit bashing
-    RJCoreTapShiftMode_Callback, //!< Jtag done with packets of data via callback
-    RJCoreTapShiftMode_Custom,   //!< Assume full control of the Jtag mechanism
+    RJCoreTapShiftMode_GPIO,   //!< Jtag done via manual bit bashing
+    RJCoreTapShiftMode_Packet, //!< Jtag done with packets of data via callback
 };
 
 // Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
 // Returns 0 if TDO low, 1 if TDO high
-typedef int (*RJCorePlatform_GPIOClockCycle)(int tdi, int tms);
+typedef int (*RJCorePlatform_TapShiftGPIOClockCycle)(void *, int tdi, int tms);
+
+// Given a packet of data, try to tap shift in bulk.  Note that you *MUST* handle
+// the case where the number of bytes received is odd, and thus you must potentially
+// be able to buffer a tdi byte until the next packet of data comes.
+// NOTE: The return value is a bit funny.
+//   This returns 0 to indicate that all bytes in the buffer are processed, and that we want
+// to keep processing packet data.
+//   If all data has been processed for a tap shift, then this returns the exact number of
+// bytes processed in the buffer - just in case extra commands are present in the serial buffer.
+//   If an error occurs, return < 0.
+//
+// Note: It is acceptable for this callback to take control of the serial port, and just block
+// until all data has been processed, as opposed to having this state machine get notified by
+// serial events.  In that case, just block, and when complete, return bufferLength.
+typedef int (*RJCorePlatform_TapShiftPacket)(void *, const uint8_t *buffer, int bufferLength);
 
 /// @brief The platform implementation
 struct RJCorePlatform
@@ -81,8 +97,10 @@ struct RJCorePlatform
     RJCorePlatform_SetPortMode setPortMode;     //!< Sets the port mode
     RJCorePlatform_SetFeature setFeature;       //!< Sets features
     RJCorePlatform_ReadVoltages readVoltages;   //!< Reads the voltages
-
-    RJCorePlatform_GPIOClockCycle tapShiftGPIO; //!< Executes one clock of the tap shift
+    RJCorePlatform_NewTapShift newTapShift;     //!< New tap shift incoming
+    RJCorePlatform_TapShiftGPIOClockCycle
+        tapShiftGPIO; //!< Executes one clock of the tap shift (tapShiftMode == RJCoreTapShiftMode_GPIO)
+    RJCorePlatform_TapShiftPacket tapShiftPacket; //!< Executes a packet (tapShiftMode == RJCoreTapShiftMode_Packet)
 };
 
 #ifdef __cplusplus
