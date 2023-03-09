@@ -16,7 +16,8 @@
 // Timeout on the UART idle.  If the UART is idle for this long, assume that OpenOCD
 // has disconnected, and reset to the wait for handshake/init state.  These units
 // are in whatever the platform currentUptime callback returns.
-#define RJCORE_UART_IDLE_TIMEOUT 1000
+#define RJCORE_UART_IDLE_TIMEOUT 0
+// #define RJCORE_UART_IDLE_TIMEOUT 1000
 #endif
 
 #ifndef RJCORE_MAXIMUM_TAP_SHIFT_BIT_COUNT

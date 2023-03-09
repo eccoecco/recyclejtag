@@ -114,6 +114,7 @@ static void RJCore_CheckIdleTime(struct RJCoreHandle *handle, size_t bytesReceiv
     {
         handle->lastRxActivityTime = currentTime;
     }
+#if RJCORE_UART_IDLE_TIMEOUT > 0
     else if (handle->currentState != &RJCoreState_Handshake)
     {
         uint32_t idleTime = currentTime - handle->lastRxActivityTime;
@@ -124,6 +125,7 @@ static void RJCore_CheckIdleTime(struct RJCoreHandle *handle, size_t bytesReceiv
             RJCore_ChangeToState(handle, &RJCoreState_Handshake);
         }
     }
+#endif
 }
 
 static int RJCore_CopyDataToBuffer(struct RJCoreHandle *handle, const uint8_t *data, int bytesAvailable)
