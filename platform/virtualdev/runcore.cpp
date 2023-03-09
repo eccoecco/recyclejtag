@@ -14,11 +14,12 @@
 
 struct PlatformData
 {
-    int fd;
+    int fd = -1;
+    int currentSerialBaud = 0;
     struct
     {
-        int bitsToShift;
-        int tdi;
+        int bitsToShift = 0;
+        int tdi = 0;
     } packet; // Used in tap shift packet mode
 };
 
@@ -33,16 +34,16 @@ uint32_t PlatformImpl_CurrentUptime(void *)
     return systemTime.tv_sec + systemTime.tv_nsec / 1000000;
 }
 
-void PlatformImpl_TransmitData(void *platformData, const void *buffer, size_t length)
+void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t length)
 {
-    auto data = static_cast<PlatformData *>(platformData);
+    auto platformData = static_cast<PlatformData *>(privateData);
 
-    write(data->fd, buffer, length);
+    write(platformData->fd, buffer, length);
 }
 
-bool PlatformImpl_SetSerialMode(void *platformData, enum RJCoreSerialMode mode)
+bool PlatformImpl_SetSerialMode(void *privateData, enum RJCoreSerialMode mode)
 {
-    (void)platformData;
+    auto platformData = static_cast<PlatformData *>(privateData);
 
     int baud = (mode == 0) ? 115200 : (mode == 1) ? 1000000 : -1;
 
@@ -52,8 +53,14 @@ bool PlatformImpl_SetSerialMode(void *platformData, enum RJCoreSerialMode mode)
         return false;
     }
 
-    // Yeah, sure, we support all sorts of baud rates.
-    std::cout << "Serial port baud request to " << baud << " baud\n";
+    if (platformData->currentSerialBaud != baud)
+    {
+        platformData->currentSerialBaud = baud;
+
+        // Yeah, sure, we support all sorts of baud rates.
+        std::cout << "Serial port baud request to " << baud << " baud\n";
+    }
+
     return true;
 }
 
@@ -114,7 +121,9 @@ void PlatformImpl_ReadVoltages(void *, uint16_t *values)
     }
 }
 
+// You can change this between Packet and GPIO mode
 constexpr enum RJCoreTapShiftMode selectedTapShiftMode = RJCoreTapShiftMode_Packet;
+// Once in packet mode, you can change this between full and partial control
 constexpr bool selectedTapShiftFullControl = false;
 
 void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
@@ -205,16 +214,63 @@ int PlatformImpl_TapShiftPacket_FullControl(void *privateData, const uint8_t *bu
     //    only the bytes used are returned)
     // 2. If more bytes are required, then access the serial port to grab more data directly, rather than
     //    going through the state machine.  For slower processors, removing this level of indirection is
-    //    critical for best performance.
-    // 3. Return the total bytes used from this buffer
+    //    critical for best performance.  NOTE: Ensure that you only read as much as this tap shift requires
+    //    otherwise, you might end up with some data from the next command in the read buffer that ends up
+    //    discarded.
+    // 3. Return the total bytes used from this buffer (or if bufferLength == 0, then return 1)
+    auto platformData = static_cast<PlatformData *>(privateData);
 
-    // TODO: Provide example
+    std::cout << "Assuming full control of incoming data stream\n";
 
-    (void)privateData;
-    (void)buffer;
-    (void)bufferLength;
+    int initialBytesProcessed = PlatformImpl_TapShiftPacket_PartialControl(privateData, buffer, bufferLength);
 
-    return 0;
+    if (initialBytesProcessed == 0)
+    {
+        // PartialControl returns 0 if it's processed the entire buffer
+        initialBytesProcessed = bufferLength;
+    }
+
+#if 0
+    std::cout << "Initial bytes processed: " << initialBytesProcessed << " out of buffer of length: " << bufferLength
+              << '\n';
+#endif
+
+    while (platformData->packet.bitsToShift != 0)
+    {
+        // Convert bitsToShift by rounding up to the next byte, divide by 8 (>> 3), but
+        // because tdi/tms are sent together (hence 2 bytes per shift), we multiply by 2
+        // once more, hence a net result of >> 2
+        size_t bytesLeft = ((platformData->packet.bitsToShift + 7) & ~0x7u) >> 2;
+
+        std::array<uint8_t, 32> readBuffer;
+        if (bytesLeft > readBuffer.size())
+        {
+            bytesLeft = readBuffer.size();
+        }
+
+        int bytesRead = read(platformData->fd, readBuffer.data(), bytesLeft);
+
+        if (bytesRead < 0)
+        {
+            std::cout << "Failed to read from pipe\n";
+            return -1;
+        }
+
+        PlatformImpl_TapShiftPacket_PartialControl(privateData, readBuffer.data(), bytesRead);
+    }
+
+    if (initialBytesProcessed == 0)
+    {
+        // Can't return 0, even if no data was processed initially because bufferLength == 0
+        // Instead, return > 0 to signal that all processing was done
+        initialBytesProcessed = 1;
+    }
+
+#if 0
+    std::cout << "Returning control with " << initialBytesProcessed << " from initial buffer\n";
+#endif
+
+    return initialBytesProcessed;
 }
 
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)

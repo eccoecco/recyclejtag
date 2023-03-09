@@ -552,11 +552,29 @@ static struct RJCoreStateReply RJCoreState_TapShiftPlatform_Process(struct RJCor
                                                                     int bytesAvailable)
 {
     int result;
+    int bytesProcessed;
 
     result = (*handle->platform->tapShiftPacket)(handle->privateData, data, bytesAvailable);
 
+    // If result == 0, then that means stay in this state.  Payload processed.
+    // If result > 0, then that means all packets have finished processing, and this should
+    // return to binary mode.  Note: If result > bytesAvailable, then result will be clamped to bytesAvailable.
+    // This is to handle the case where this is called with bytesAvailable == 0, and the callback assumed
+    // full control of the serial port.
+
+    bytesProcessed = result;
+    if (bytesProcessed == 0)
+    {
+        // Returning 0 means stay in this state - the entire packet has been processed
+        bytesProcessed = bytesAvailable;
+    }
+    else if (bytesProcessed > bytesAvailable)
+    {
+        bytesProcessed = bytesAvailable;
+    }
+
     return (struct RJCoreStateReply){
-        .bytesProcessed = (result == 0) ? bytesAvailable : result,
+        .bytesProcessed = bytesProcessed,
         .nextState = (result > 0) ? &RJCoreState_BinaryMode : NULL,
     };
 }
