@@ -26,11 +26,11 @@ struct PlatformData
 namespace
 {
 
-// Select one of:
+// To examine various operation modes, select one of:
 //   RJCoreTapShiftMode_GPIO
 //   RJCoreTapShiftMode_Packet
 //   RJCoreTapShiftMode_Custom
-constexpr enum RJCoreTapShiftMode selectedTapShiftMode = RJCoreTapShiftMode_Packet;
+constexpr enum RJCoreTapShiftMode selectedTapShiftMode = RJCoreTapShiftMode_Custom;
 
 uint32_t PlatformImpl_CurrentUptime(void *)
 {
@@ -188,12 +188,90 @@ int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bi
     return 0;
 }
 
-int PlatformImpl_TapShiftCustom(void *privateData, const uint8_t *buffer, int bufferLength, int totalBitsToShift)
+int PlatformImpl_TapShiftCustom(void *privateData, const uint8_t *coreBuffer, int coreBufferLength,
+                                int totalBitsToShift)
 {
-    (void)privateData;
-    (void)buffer;
-    (void)bufferLength;
-    (void)totalBitsToShift;
+    std::array<uint8_t, 32> localBuffer;
+    int bytesInBuffer = 0;
+
+    auto platformData = static_cast<PlatformData *>(privateData);
+
+    if ((coreBufferLength & 0x1) != 0)
+    {
+        // An odd number of bytes were presented from the core
+        // Since tdi/tms are processed in even pairs, we tuck away that odd byte
+        // at the end in our local buffer, to ensure that coreBufferLength is even
+        bytesInBuffer = 1;
+        localBuffer[0] = coreBuffer[coreBufferLength - 1];
+        --coreBufferLength;
+    }
+
+    if (coreBufferLength > 0)
+    {
+        // Process pairs of existing data
+        int bitsAvailable = coreBufferLength << 2;
+        if (bitsAvailable > totalBitsToShift)
+        {
+            bitsAvailable = totalBitsToShift;
+        }
+
+        // Just call this as an example of processing data
+        if (PlatformImpl_TapShiftPacket(privateData, coreBuffer, bitsAvailable) < 0)
+        {
+            return -1;
+        }
+    }
+
+    while (platformData->packet.bitsShifted < platformData->packet.totalBitsToShift)
+    {
+        // Need to ensure that we only read as many bytes as we need to for the tap shift
+        // No more, because that would mean that we accidentally get data for the next
+        // command (if it was already sent).
+        int bitsLeftToShift = platformData->packet.totalBitsToShift - platformData->packet.bitsShifted;
+        int bytesRemaining = ((bitsLeftToShift + 7) >> 3) * 2;
+        if (bytesRemaining > static_cast<int>(localBuffer.size()))
+        {
+            bytesRemaining = static_cast<int>(localBuffer.size());
+        }
+        bytesRemaining -= bytesInBuffer;
+
+        int bytesRead = read(platformData->fd, localBuffer.data() + bytesInBuffer, bytesRemaining);
+
+        if (bytesRead <= 0)
+        {
+            // Shouldn't happen, if it does, no recovery
+            return -1;
+        }
+
+        bytesInBuffer += bytesRead;
+
+        if (bytesInBuffer > 1)
+        {
+            // Only process even numbers of bytes
+            int bitsInBuffer = (bytesInBuffer & ~0x1) << 2;
+            if (bitsInBuffer > bitsLeftToShift)
+            {
+                bitsInBuffer = bitsLeftToShift;
+            }
+            if (PlatformImpl_TapShiftPacket(privateData, localBuffer.data(), bitsInBuffer) < 0)
+            {
+                return -1;
+            }
+        }
+
+        if ((bytesInBuffer & 1) != 0)
+        {
+            // Odd bytes leave 1 byte in the buffer
+            localBuffer[0] = localBuffer[bytesInBuffer - 1];
+            bytesInBuffer = 1;
+        }
+        else
+        {
+            // All even bytes should have been processed
+            bytesInBuffer = 0;
+        }
+    }
+
     return 0;
 }
 
