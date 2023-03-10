@@ -24,8 +24,9 @@ static struct RJCoreStateReply RJCoreState_SetPortMode_Process(struct RJCoreHand
 static struct RJCoreStateReply RJCoreState_SetFeatures_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_ReadVoltages_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_TapShiftInitialise_Process(struct RJCoreHandle *, const uint8_t *, int);
-static struct RJCoreStateReply RJCoreState_TapShiftPlatform_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_TapShiftPacket_Process(struct RJCoreHandle *, const uint8_t *, int);
+static struct RJCoreStateReply RJCoreState_TapShiftCustom_Process(struct RJCoreHandle *, const uint8_t *, int);
 
 static struct RJCoreStateDescription RJCoreState_Handshake = {
     .stateEnter = RJCoreState_Handshake_Enter,
@@ -67,15 +68,20 @@ static struct RJCoreStateDescription RJCoreState_TapShiftInitialise = {
     .stateProcess = RJCoreState_TapShiftInitialise_Process,
     .bytesRequired = 2,
 };
-static struct RJCoreStateDescription RJCoreState_TapShiftPlatform = {
-    .stateEnter = NULL,
-    .stateProcess = RJCoreState_TapShiftPlatform_Process,
-    .bytesRequired = -1,
-};
 static struct RJCoreStateDescription RJCoreState_TapShiftGPIO = {
     .stateEnter = NULL,
     .stateProcess = RJCoreState_TapShiftGPIO_Process,
     .bytesRequired = 2,
+};
+static struct RJCoreStateDescription RJCoreState_TapShiftPacket = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_TapShiftPacket_Process,
+    .bytesRequired = -1,
+};
+static struct RJCoreStateDescription RJCoreState_TapShiftCustom = {
+    .stateEnter = NULL,
+    .stateProcess = RJCoreState_TapShiftCustom_Process,
+    .bytesRequired = -1,
 };
 
 static inline void RJCore_ChangeToState(struct RJCoreHandle *handle, const struct RJCoreStateDescription *state)
@@ -481,6 +487,9 @@ static struct RJCoreStateReply RJCoreState_TapShiftInitialise_Process(struct RJC
         }
 
         handle->stateData.state.tapShift.bitsToShift = bitsToShift;
+        handle->stateData.state.tapShift.bufferUsed = 0;
+        handle->stateData.state.tapShift.packetBuffer[0] = 0;
+        handle->stateData.state.tapShift.packetBuffer[1] = 0;
 
         if (handle->platform->newTapShift)
         {
@@ -495,8 +504,9 @@ static struct RJCoreStateReply RJCoreState_TapShiftInitialise_Process(struct RJC
 
         return (struct RJCoreStateReply){
             .bytesProcessed = 0,
-            .nextState = (handle->platform->tapShiftMode == RJCoreTapShiftMode_GPIO) ? &RJCoreState_TapShiftGPIO
-                                                                                     : &RJCoreState_TapShiftPlatform,
+            .nextState = (handle->platform->tapShiftMode == RJCoreTapShiftMode_GPIO)     ? &RJCoreState_TapShiftGPIO
+                         : (handle->platform->tapShiftMode == RJCoreTapShiftMode_Packet) ? &RJCoreState_TapShiftPacket
+                                                                                         : &RJCoreState_TapShiftCustom,
         };
     }
 
@@ -550,33 +560,125 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
     };
 }
 
-static struct RJCoreStateReply RJCoreState_TapShiftPlatform_Process(struct RJCoreHandle *handle, const uint8_t *data,
-                                                                    int bytesAvailable)
+static int RJCoreState_TapShiftPacket_ProcessInvoke(struct RJCoreHandle *handle, const uint8_t *data,
+                                                    int bytesAvailable)
 {
-    int result;
-    int bytesProcessed;
-
-    result = (*handle->platform->tapShiftPacket)(handle->privateData, data, bytesAvailable);
-
-    // If result == 0, then that means stay in this state.  Payload processed.
-    // If result > 0, then that means all packets have finished processing, and this should
-    // return to binary mode.  Note: If result > bytesAvailable, then result will be clamped to bytesAvailable.
-    // This is to handle the case where this is called with bytesAvailable == 0, and the callback assumed
-    // full control of the serial port.
-
-    bytesProcessed = result;
-    if (bytesProcessed == 0)
+    // bytesAvailable should always be even
+    if ((bytesAvailable & 0x01) != 0)
     {
-        // Returning 0 means stay in this state - the entire packet has been processed
-        bytesProcessed = bytesAvailable;
+        // Internal error, whoops...
+        return -1;
     }
-    else if (bytesProcessed > bytesAvailable)
+
+    // TDI/TMS comes in pairs, so every 2 bytes available means 8 bits of data, hence * 4
+    int bitsAvailable = bytesAvailable << 2;
+
+    if (bitsAvailable > handle->stateData.state.tapShift.bitsToShift)
     {
-        bytesProcessed = bytesAvailable;
+        bitsAvailable = handle->stateData.state.tapShift.bitsToShift;
+    }
+
+    if ((*handle->platform->tapShiftPacket)(handle->privateData, data, bitsAvailable) < 0)
+    {
+        return -1;
+    }
+
+    handle->stateData.state.tapShift.bitsToShift -= bitsAvailable;
+
+    // Return number of actual bytes consumed
+    return ((bitsAvailable + 7) & ~0x7u) >> 2;
+}
+
+static struct RJCoreStateReply RJCoreState_TapShiftPacket_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                  int bytesAvailable)
+{
+    int bytesProcessed = 0;
+    int res = 0;
+
+    if (bytesAvailable == 0)
+    {
+        // Need data to process
+        return (struct RJCoreStateReply){
+            .bytesProcessed = 0,
+            .nextState = NULL,
+        };
+    }
+
+    if (handle->stateData.state.tapShift.bufferUsed != 0)
+    {
+        // Implies that a tdi without a matching tms is being buffered
+        handle->stateData.state.tapShift.packetBuffer[1] = data[0];
+
+        res = RJCoreState_TapShiftPacket_ProcessInvoke(handle, handle->stateData.state.tapShift.packetBuffer, 2);
+
+        handle->stateData.state.tapShift.bufferUsed = 0;
+
+        ++data;
+        ++bytesProcessed;
+        --bytesAvailable;
+    }
+
+    // Requires an even number of bytes in a packet
+    if ((res == 0) && (bytesAvailable > 1) && (handle->stateData.state.tapShift.bitsToShift > 0))
+    {
+        // Only ever send even amounts of data, so that tdi/tms can be easily extracted
+        res = RJCoreState_TapShiftPacket_ProcessInvoke(handle, data, bytesAvailable & ~0x1u);
+
+        if (res > 0)
+        {
+            data += res;
+            bytesProcessed += res;
+            bytesAvailable -= res;
+        }
+    }
+
+    if ((res == 0) && (bytesAvailable == 1) && (handle->stateData.state.tapShift.bitsToShift > 0))
+    {
+        // Odd byte out - just buffer it
+        handle->stateData.state.tapShift.bufferUsed = 1;
+        handle->stateData.state.tapShift.packetBuffer[0] = data[0];
+
+        ++data;
+        ++bytesProcessed;
+        --bytesAvailable;
+    }
+
+    if (res < 0)
+    {
+        return (struct RJCoreStateReply){
+            .bytesProcessed = -1,
+            .nextState = NULL,
+        };
     }
 
     return (struct RJCoreStateReply){
         .bytesProcessed = bytesProcessed,
-        .nextState = (result > 0) ? &RJCoreState_BinaryMode : NULL,
+        .nextState = (handle->stateData.state.tapShift.bitsToShift == 0) ? &RJCoreState_BinaryMode : NULL,
+    };
+}
+
+static struct RJCoreStateReply RJCoreState_TapShiftCustom_Process(struct RJCoreHandle *handle, const uint8_t *data,
+                                                                  int bytesAvailable)
+{
+    int bytesProcessed = bytesAvailable;
+    int bitsToShift = handle->stateData.state.tapShift.bitsToShift;
+
+    int bytesRequired = ((bitsToShift + 7) & ~0x7u) >> 2;
+
+    if (bytesProcessed > bytesRequired)
+    {
+        // Edge case: The entire tap shift is already in the buffer, but has extra data behind it!
+        // Ensure that we don't accidentally mark that data as processed.
+        bytesProcessed = bytesRequired;
+    }
+
+    if ((*handle->platform->tapShiftCustom)(handle->privateData, data, bytesProcessed, bitsToShift) < 0)
+    {
+        bytesProcessed = -1;
+    }
+
+    return (struct RJCoreStateReply){
+        .bytesProcessed = bytesProcessed,
+        .nextState = (bytesProcessed < 0) ? NULL : &RJCoreState_BinaryMode,
     };
 }

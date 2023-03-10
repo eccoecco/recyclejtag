@@ -18,13 +18,19 @@ struct PlatformData
     int currentSerialBaud = 0;
     struct
     {
-        int bitsToShift = 0;
-        int tdi = 0;
-    } packet; // Used in tap shift packet mode
+        int totalBitsToShift = 0;
+        int bitsShifted = 0;
+    } packet;
 };
 
 namespace
 {
+
+// Select one of:
+//   RJCoreTapShiftMode_GPIO
+//   RJCoreTapShiftMode_Packet
+//   RJCoreTapShiftMode_Custom
+constexpr enum RJCoreTapShiftMode selectedTapShiftMode = RJCoreTapShiftMode_Packet;
 
 uint32_t PlatformImpl_CurrentUptime(void *)
 {
@@ -121,16 +127,11 @@ void PlatformImpl_ReadVoltages(void *, uint16_t *values)
     }
 }
 
-// You can change this between Packet and GPIO mode
-constexpr enum RJCoreTapShiftMode selectedTapShiftMode = RJCoreTapShiftMode_Packet;
-// Once in packet mode, you can change this between full and partial control
-constexpr bool selectedTapShiftFullControl = false;
-
 void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
 {
     auto platformData = static_cast<PlatformData *>(privateData);
-    platformData->packet.bitsToShift = totalBitsToShift;
-    platformData->packet.tdi = -1;
+    platformData->packet.bitsShifted = 0;
+    platformData->packet.totalBitsToShift = totalBitsToShift;
 
     std::cout << "New tap shift of " << totalBitsToShift << " bits\n";
 }
@@ -142,14 +143,9 @@ int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
     return 0;
 }
 
-inline void TapShiftPacket_ProcessByte(PlatformData *platformData, uint8_t tdi, uint8_t tms)
+inline void TapShiftPacket_ProcessByte(PlatformData *platformData, int bitsToProcess, uint8_t tdi, uint8_t tms)
 {
-    int bitsToProcess = 8;
-    if (bitsToProcess > platformData->packet.bitsToShift)
-    {
-        bitsToProcess = platformData->packet.bitsToShift;
-    }
-
+    (void)bitsToProcess;
     (void)tdi;
     (void)tms;
 
@@ -157,120 +153,48 @@ inline void TapShiftPacket_ProcessByte(PlatformData *platformData, uint8_t tdi, 
 
     write(platformData->fd, &reply, 1);
 
-    platformData->packet.bitsToShift -= bitsToProcess;
+    platformData->packet.bitsShifted += bitsToProcess;
 }
 
 // In partial control, this lets the state machine still get notified by uart events, and handles
 // buffering and passing pointer data over.  Multiple calls to this are expected, as packets of data
 // come in.
-int PlatformImpl_TapShiftPacket_PartialControl(void *privateData, const uint8_t *buffer, int bufferLength)
+int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bitsToShift)
 {
     auto platformData = static_cast<PlatformData *>(privateData);
-    int bytesProcessed = 0;
 
-    std::cout << "Packet to process of buffer length: " << bufferLength << '\n';
+    std::cout << "Packet to process has bits to shift: " << bitsToShift << '\n';
 
-    if (bufferLength == 0)
+    for (; bitsToShift > 0; bitsToShift -= 8, buffer += 2)
     {
-        return 0;
+        int bitsValid = 8;
+        if (bitsValid > bitsToShift)
+        {
+            bitsValid = bitsToShift;
+        }
+
+        TapShiftPacket_ProcessByte(platformData, bitsValid, buffer[0], buffer[1]);
     }
 
-    // Handle the case where there's a leftover tdi from the previous packet
-    if (platformData->packet.tdi >= 0)
+    if (platformData->packet.bitsShifted == platformData->packet.totalBitsToShift)
     {
-        TapShiftPacket_ProcessByte(platformData, platformData->packet.tdi, *buffer);
-        platformData->packet.tdi = -1;
-
-        ++buffer;
-        ++bytesProcessed;
-        --bufferLength;
+        std::cout << "Finished processing an entire tap shift\n";
+    }
+    else if (platformData->packet.bitsShifted > platformData->packet.totalBitsToShift)
+    {
+        std::cout << "INTERNAL ERROR: Shifted more bits than expected!?\n";
     }
 
-    for (; (bufferLength > 1) && (platformData->packet.bitsToShift > 0); bufferLength -= 2, buffer += 2)
-    {
-        TapShiftPacket_ProcessByte(platformData, buffer[0], buffer[1]);
-        bytesProcessed += 2;
-    }
-
-    if ((bufferLength == 1) && (platformData->packet.bitsToShift > 0))
-    {
-        // Oh dear, leftover tdi, and still more data to shift
-        platformData->packet.tdi = *buffer;
-        ++bytesProcessed;
-    }
-
-    if (platformData->packet.bitsToShift == 0)
-    {
-        std::cout << "Finished shifting a packet\n";
-    }
-
-    return (platformData->packet.bitsToShift == 0) ? bytesProcessed : 0;
+    return 0;
 }
 
-int PlatformImpl_TapShiftPacket_FullControl(void *privateData, const uint8_t *buffer, int bufferLength)
+int PlatformImpl_TapShiftCustom(void *privateData, const uint8_t *buffer, int bufferLength, int totalBitsToShift)
 {
-    // If you want the callback to assume full control, then:
-    // 1. Process the buffer that's passed in (and make sure that if there's more data than required,
-    //    only the bytes used are returned)
-    // 2. If more bytes are required, then access the serial port to grab more data directly, rather than
-    //    going through the state machine.  For slower processors, removing this level of indirection is
-    //    critical for best performance.  NOTE: Ensure that you only read as much as this tap shift requires
-    //    otherwise, you might end up with some data from the next command in the read buffer that ends up
-    //    discarded.
-    // 3. Return the total bytes used from this buffer (or if bufferLength == 0, then return 1)
-    auto platformData = static_cast<PlatformData *>(privateData);
-
-    std::cout << "Assuming full control of incoming data stream\n";
-
-    int initialBytesProcessed = PlatformImpl_TapShiftPacket_PartialControl(privateData, buffer, bufferLength);
-
-    if (initialBytesProcessed == 0)
-    {
-        // PartialControl returns 0 if it's processed the entire buffer
-        initialBytesProcessed = bufferLength;
-    }
-
-#if 0
-    std::cout << "Initial bytes processed: " << initialBytesProcessed << " out of buffer of length: " << bufferLength
-              << '\n';
-#endif
-
-    while (platformData->packet.bitsToShift != 0)
-    {
-        // Convert bitsToShift by rounding up to the next byte, divide by 8 (>> 3), but
-        // because tdi/tms are sent together (hence 2 bytes per shift), we multiply by 2
-        // once more, hence a net result of >> 2
-        size_t bytesLeft = ((platformData->packet.bitsToShift + 7) & ~0x7u) >> 2;
-
-        std::array<uint8_t, 32> readBuffer;
-        if (bytesLeft > readBuffer.size())
-        {
-            bytesLeft = readBuffer.size();
-        }
-
-        int bytesRead = read(platformData->fd, readBuffer.data(), bytesLeft);
-
-        if (bytesRead < 0)
-        {
-            std::cout << "Failed to read from pipe\n";
-            return -1;
-        }
-
-        PlatformImpl_TapShiftPacket_PartialControl(privateData, readBuffer.data(), bytesRead);
-    }
-
-    if (initialBytesProcessed == 0)
-    {
-        // Can't return 0, even if no data was processed initially because bufferLength == 0
-        // Instead, return > 0 to signal that all processing was done
-        initialBytesProcessed = 1;
-    }
-
-#if 0
-    std::cout << "Returning control with " << initialBytesProcessed << " from initial buffer\n";
-#endif
-
-    return initialBytesProcessed;
+    (void)privateData;
+    (void)buffer;
+    (void)bufferLength;
+    (void)totalBitsToShift;
+    return 0;
 }
 
 std::unique_ptr<PosixFile> CreateEpollInstance(int fd)
@@ -330,8 +254,8 @@ void startRjCore(int fd)
         .readVoltages = PlatformImpl_ReadVoltages,
         .newTapShift = PlatformImpl_NewTapShift,
         .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
-        .tapShiftPacket = selectedTapShiftFullControl ? PlatformImpl_TapShiftPacket_FullControl
-                                                      : PlatformImpl_TapShiftPacket_PartialControl,
+        .tapShiftPacket = PlatformImpl_TapShiftPacket,
+        .tapShiftCustom = PlatformImpl_TapShiftCustom,
     };
     PlatformData platformData{
         .fd = fd,

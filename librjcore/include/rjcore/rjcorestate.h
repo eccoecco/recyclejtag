@@ -35,6 +35,8 @@ struct RJCoreStateData
         struct
         {
             int bitsToShift;
+            uint8_t packetBuffer[2];
+            uint8_t bufferUsed;
         } tapShift;
     } state;
 };

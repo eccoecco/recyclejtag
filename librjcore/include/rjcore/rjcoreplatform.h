@@ -65,26 +65,34 @@ enum RJCoreTapShiftMode
 {
     RJCoreTapShiftMode_GPIO,   //!< Jtag done via manual bit bashing
     RJCoreTapShiftMode_Packet, //!< Jtag done with packets of data via callback
+    RJCoreTapShiftMode_Custom, //!< Jtag done with a full custom callback
 };
 
 // Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
 // Returns 0 if TDO low, 1 if TDO high
 typedef int (*RJCorePlatform_TapShiftGPIOClockCycle)(void *, int tdi, int tms);
 
-// Given a packet of data, try to tap shift in bulk.  Note that you *MUST* handle
-// the case where the number of bytes received is odd, and thus you must potentially
-// be able to buffer a tdi byte until the next packet of data comes.
-// NOTE: The return value is a bit funny.
-//   This returns 0 to indicate that all bytes in the buffer are processed, and that we want
-// to keep processing packet data.
-//   If all data has been processed for a tap shift, then this returns the exact number of
-// bytes processed in the buffer - just in case extra commands are present in the serial buffer.
-//   If an error occurs, return < 0.
+// Callback for when mode is RJCoreTapShiftMode_Packet
+// This callback returns 0 for success, -1 to reset to handshake mode.
+// This callback is invoked with even packets of data, so that you're always guaranteed to
+// have tdi/tms come in a pair.
+// === Note: The length is in *bits* to shift, not *bytes*. ===
+// e.g. If bitsToShift == 13, then you would expect { buffer[0], buffer[1] } to represent
+// the first 8 bits to shift of {tdi, tms}, and then { buffer[2], buffer[3] } to only contain
+// the remaining 5 bits to shift of {tdi, tms} starting from the least significant bit.
+typedef int (*RJCorePlatform_TapShiftPacket)(void *, const uint8_t *buffer, int bitsToShift);
+
+// Callback for when mode is RJCoreTapShiftMode_Custom
+// This callback returns 0 for success, -1 to reset to handshake mode.
+// This callback is invoked exactly once.  If the internal buffer has data that should be
+// processed as part of the tap shift, then it will be placed in buffer and marked as bytesAvailable.
+//  After that is processed, the callback should assume control of the uart, and *only read enough bytes*
+// from the uart to complete this tap shift.
 //
-// Note: It is acceptable for this callback to take control of the serial port, and just block
-// until all data has been processed, as opposed to having this state machine get notified by
-// serial events.  In that case, just block, and when complete, return bufferLength.
-typedef int (*RJCorePlatform_TapShiftPacket)(void *, const uint8_t *buffer, int bufferLength);
+// Note: Keep in mind, due to timing/serial port, it is entirely possible that an odd number
+// of bytes are available, and thus a tdi is present without a corresponding tms.  This callback
+// will need to handle this edge case correctly.
+typedef int (*RJCorePlatform_TapShiftCustom)(void *, const uint8_t *buffer, int bytesAvailable, int totalBitsToShift);
 
 /// @brief The platform implementation
 struct RJCorePlatform
@@ -100,7 +108,8 @@ struct RJCorePlatform
     RJCorePlatform_NewTapShift newTapShift;     //!< New tap shift incoming
     RJCorePlatform_TapShiftGPIOClockCycle
         tapShiftGPIO; //!< Executes one clock of the tap shift (tapShiftMode == RJCoreTapShiftMode_GPIO)
-    RJCorePlatform_TapShiftPacket tapShiftPacket; //!< Executes a packet (tapShiftMode == RJCoreTapShiftMode_Packet)
+    RJCorePlatform_TapShiftPacket tapShiftPacket; //!< Executes a packet for tap shifting in packet mode
+    RJCorePlatform_TapShiftCustom tapShiftCustom; //!< Executes a fully custom callback for tap shifting
 };
 
 #ifdef __cplusplus
