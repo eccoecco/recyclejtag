@@ -236,6 +236,11 @@ static void RJCoreState_Handshake_Enter(struct RJCoreHandle *handle)
     (*handle->platform->setSerialMode)(handle->privateData, RJCoreSerialMode_Normal);
 }
 
+static inline void RJCoreState_Transmit_BusPirateIdentifier(struct RJCoreHandle *handle)
+{
+    (*handle->platform->transmitData)(handle->privateData, "BBIO1", 5);
+}
+
 static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle *handle, const uint8_t *data,
                                                              int bytesAvailable)
 {
@@ -255,8 +260,7 @@ static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle
 
                 if (handle->stateData.generic.value == 20)
                 {
-                    // Send the Bus Pirate identifier
-                    (*handle->platform->transmitData)(handle->privateData, "BBIO1", 5);
+                    RJCoreState_Transmit_BusPirateIdentifier(handle);
                 }
             }
             // Okay to keep on receiving lots of zeroes - it might be that some were errant
@@ -326,6 +330,13 @@ static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandl
                 .nextState = &RJCoreState_ReadVoltages,
             };
         case BusPirateCommand_TapShift:
+            return (struct RJCoreStateReply){
+                .bytesProcessed = 0,
+                .nextState = &RJCoreState_TapShiftInitialise,
+            };
+        case BusPirateCommand_Unknown:
+            // When OpenOCD exits binary mode, it expects to find an identifier response
+            RJCoreState_Transmit_BusPirateIdentifier(handle);
             return (struct RJCoreStateReply){
                 .bytesProcessed = 0,
                 .nextState = &RJCoreState_TapShiftInitialise,
