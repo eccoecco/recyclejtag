@@ -16,6 +16,8 @@ Note that the toolchain does not have to be in the path.
 
 I personally installed the toolchain so that `arm-none-eabi-gcc` can be found in `${HOME}/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc`
 
+Since that is not in the path, you will need to set the `ARMGCC_DIR` environment variable to `${HOME}/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi/bin/` when configuring the project with CMake.
+
 ### Grab NXP's MCUXpresso SDK
 
 You'll need to grab [NXP's MCUXpresso SDK](https://mcuxpresso.nxp.com/en/welcome).  NXP requires you to configure what you want to download, and here are the settings that I use:
@@ -27,3 +29,23 @@ You'll need to grab [NXP's MCUXpresso SDK](https://mcuxpresso.nxp.com/en/welcome
 In this SDK are useful files, such as LPC845 header files, startup scripts, and linker scripts.  It also integrates nicely with CMake.
 
 I have installed this so that the SDK manifest can be found in `${HOME}/mcuxpresso/sdk-2.13-lpc845/LPC845_manifest_v3_10.xml`
+
+Set `LPC845_SDK_DIR` to this path.
+
+### Example `settings.json` for VSCode
+
+In `platform/lpc845-brk/.vscode`, you can update `settings.json` with something like:
+
+```
+{
+    "cmake.configureSettings": {
+        "CMAKE_TOOLCHAIN_FILE": "toolchain/arm-none-eabi.cmake"
+    },
+    "cmake.environment": {
+        "ARMGCC_DIR": "${userHome}/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi",
+        "LPC845_SDK_DIR": "${userHome}/mcuxpresso/sdk-2.13-lpc845"
+    }
+}
+```
+
+This will point CMake to use the correct toolchain file, and set the CMake environment variables to where `arm-none-eabi` and the MCUXpresso SDK is stored.
