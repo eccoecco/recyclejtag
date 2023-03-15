@@ -49,3 +49,5 @@ In `platform/lpc845-brk/.vscode`, you can update `settings.json` with something 
 ```
 
 This will point CMake to use the correct toolchain file, and set the CMake environment variables to where `arm-none-eabi` and the MCUXpresso SDK is stored.
+
+Be sure to set the kit to "No active kit" or "\[Unspecified\]", otherwise CMake will attempt to configure the project with the kit while having a toolchain file that's trying to overwrite the compilers that the kit is trying to specify.  It's a mess.  Don't do it.
