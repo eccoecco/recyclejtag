@@ -36,6 +36,7 @@ target_link_libraries(rjtag
     lpc845_platform
 #    librjcore
 )
+set_target_properties(rjtag PROPERTIES SUFFIX ".elf")
 
 
 #target_compile_features(rjtag PRIVATE cxx_std_20)
