@@ -32,6 +32,57 @@ I have installed this so that the SDK manifest can be found in `${HOME}/mcuxpres
 
 Set `LPC845_SDK_DIR` to this path.
 
+### Grab `pyocd` for Programming and Debugging
+
+Install [pyOCD](https://pyocd.io/) to allow easy access to the CMSIS-DAP debug probe on the LPC845-BRK development board. To install, you need to have a recent version of Python 3. The simplest way which makes it available to the current user is to simply run:
+```
+python3 -m pip install -U pyocd
+```
+
+If on Linux, you may see warnings like `WARNING: The script natsort is installed in '/home/username/.local/bin' which is not on PATH.` in which case, add `.local/bin` to the `PATH`.
+
+Once installed, you should be able to run it from the command prompt, and get a result like:
+
+```
+pyocd list
+  #   Probe/Board                                    Unique ID   Target
+-------------------------------------------------------------------------
+  0   NXP Semiconductors LPC11U3x CMSIS-DAP v1.0.7   17035034    n/a
+```
+
+If you're running WSL2, you may use to investigate using `usbipd` to forward USB connections from a Windows host to the WSL instance, and then setting up udev rules to allow access.
+
+Something like in a file in `/etc/udev/rules.d/50-cmsis-dap.rules` (copied and modified from main `pyOCD` distribution):
+```
+# 1fc9:0143 NXP LPC845 Breakout
+SUBSYSTEM=="usb", ATTR{idVendor}=="1fc9", ATTR{idProduct}=="0132", MODE:="666"
+```
+
+You may need to run `sudo service udev restart` every time your WSL instance starts, because daemons are not kept running in WSL, and this is needed to get `udev` running.
+
+### Manually accessing virtual COM port
+
+During development, it is entirely possible that you're doing `cat /dev/ttyACM0` on one terminal, and echoing data on another.
+
+In this case, you'll need to put the terminal into raw mode, disable echo, and set the correct baud rate:
+
+```
+stty -F /dev/ttyACM0 raw 115200 -echo
+```
+
+This disables a lot of processing, and also, more importantly, disables echoing, otherwise data from the LPC845 gets echoed back to itself, causing an awful infinite loop of data.
+
+You can check to make sure that the serial port has echo disabled by querying it:
+
+```
+$ stty -F /dev/ttyACM0
+speed 115200 baud; line = 0;
+min = 1; time = 0;
+-brkint -icrnl -imaxbel
+-opost
+-isig -icanon -echo
+```
+
 ### Example `settings.json` for VSCode
 
 In `platform/lpc845-brk/.vscode`, you can update `settings.json` with something like:
@@ -51,3 +102,35 @@ In `platform/lpc845-brk/.vscode`, you can update `settings.json` with something 
 This will point CMake to use the correct toolchain file, and set the CMake environment variables to where `arm-none-eabi` and the MCUXpresso SDK is stored.
 
 Be sure to set the kit to "No active kit" or "\[Unspecified\]", otherwise CMake will attempt to configure the project with the kit while having a toolchain file that's trying to overwrite the compilers that the kit is trying to specify.  It's a mess.  Don't do it.
+
+### Example `launch.json` for VSCode
+
+In `platform/lpc845-brk/.vscode`, you can add a launch entry into `launch.json` like so:
+
+```
+        {
+            "name": "Cortex Debug",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/rjtag.elf",
+            "gdbPath": "gdb-multiarch",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "pyocd",
+            "armToolchainPath": "${userHome}/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi/bin",
+            "targetId": "lpc845"
+        }
+```
+
+You must have installed the Cortex Debug extension, which will handle invoking `pyocd` for you.
+
+`targetId` is required, otherwise flashing the device will fail.
+
+Note that `gdbPath` is set to `gdb-multiarch` provided by Ubuntu (`sudo apt install gdb-multiarch`) as opposed to the version of gdb provided by ARM, because it's missing a few dependencies and I can't be bothered fixing it when a workable alternative is present.  Trying to run `arm-none-eabi-gdb` gives:
+
+```
+$ ~/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb
+~/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb: error while loading shared libraries: libncursesw.so.5: cannot open shared object file: No such file or directory
+```
+
+and once that is installed, some error about Python.
