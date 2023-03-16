@@ -61,6 +61,49 @@ template <int accessCycles> inline void InitFlashAccessCycles()
     flashCfg |= (accessCycles - 1);
     FLASH_CTRL->FLASHCFG = flashCfg;
 }
+
+/*!
+    \brief Initialises USART0 for asynchronous 115,200 baud rate
+*/
+inline void InitUSART0()
+{
+    // The LPC845 breakout board wires RX to P0.24, and TX to P0.25
+    // P0.24 and P0.25 have no special functions in SWM->PINENABLE{0,1}, so nothing needs to be done there
+
+    constexpr uint32_t ioconMode_PullUp = 2;
+    // Pull up, hysteresis enabled, not inverted, disable open drain, bypass input digital filter
+    constexpr uint32_t ioconPinMode = (ioconMode_PullUp << IOCON_PIO_MODE_SHIFT) | (1 << IOCON_PIO_HYS_SHIFT);
+
+    IOCON->PIO[IOCON_INDEX_PIO0_24] = ioconPinMode;
+    IOCON->PIO[IOCON_INDEX_PIO0_25] = ioconPinMode;
+
+    constexpr uint32_t uart0PinAssignment = SWM_PINASSIGN0_U0_RTS_O_MASK | SWM_PINASSIGN0_U0_CTS_I_MASK |
+                                            SWM_PINASSIGN0_U0_TXD_O(25) | SWM_PINASSIGN0_U0_RXD_I(24);
+    SWM0->PINASSIGN.PINASSIGN0 = uart0PinAssignment;
+
+    SYSCON->FRG[0].FRGDIV = 0xFF; // As per datasheet, must be 0xFF, to represent / 256 (no other values supported)
+    SYSCON->FRG[0].FRGMULT = 207; // Divide 30MHz FRO to 16587473, close to a nominal 16588800
+    SYSCON->FRG[0].FRGCLKSEL = 0; // Select FRO (should be 30MHz)
+
+    // UART0CLKSEL is index 0, as per 8.6.26
+    SYSCON->FCLKSEL[0] = 2; // Select FRG0 clock
+
+    // Register values are off by one to actual values
+    // Divide by 9, coupled with oversample value of 16 means a clock divisor of 9 * 16 = 144
+    // to get the final baud rate from the fractional baud clock:
+    //   16587473 / 144 = 115190.78, which is close enough to 115200
+    USART0->BRG = 8;
+    USART0->OSR = 15;
+
+    USART0->CTL = 0; // Default control is good
+    // Enable, 8N1 data, asynchronous, no flow, no loopback, not inverted
+
+    // Enable receive ready interrupt - wait until data is ready to transmit before interested in txrdy
+    // USART0->INTENSET = USART_INTENCLR_RXRDYCLR(1); // | USART_INTENCLR_TXRDYCLR(1);
+
+    USART0->CFG = USART_CFG_ENABLE(1) | USART_CFG_DATALEN(1);
+}
+
 } // namespace Internal::LPC845
 
 } // namespace
@@ -70,6 +113,16 @@ namespace Init
 
 void InitSystem(void)
 {
+    constexpr uint32_t sysAHBClkCtrl0Flags = (1 << SYSCON_SYSAHBCLKCTRL0_SWM_SHIFT) |
+                                             (1 << SYSCON_SYSAHBCLKCTRL0_UART0_SHIFT) |
+                                             (1 << SYSCON_SYSAHBCLKCTRL0_IOCON_SHIFT);
+
+    SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 | sysAHBClkCtrl0Flags;
+
+    constexpr uint32_t presetCtrl0Flags = SYSCON_PRESETCTRL0_IOCON_RST_N(1);
+    SYSCON->PRESETCTRL0 = SYSCON->PRESETCTRL0 & ~presetCtrl0Flags;
+    SYSCON->PRESETCTRL0 = SYSCON->PRESETCTRL0 | presetCtrl0Flags;
+
     // Up internal PLL to high speed
     Internal::LPC845::InitFROClock<Clocks::FROFrequency_Hz>();
 
@@ -78,6 +131,13 @@ void InitSystem(void)
     // setting the access cycle to 1 cycle is not guaranteed across all temperature conditions when FRO is 30MHz
     // (because the core speed is almost equal to flash speed), but 2 cycles is okay.
     Internal::LPC845::InitFlashAccessCycles<2>();
+
+    NVIC_EnableIRQ(USART0_IRQn);
+
+    Internal::LPC845::InitUSART0();
+
+    // Turn off SWM clock once configured
+    SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 & ~static_cast<uint32_t>(1u << SYSCON_SYSAHBCLKCTRL0_SWM_SHIFT);
 }
 
 } // namespace Init
