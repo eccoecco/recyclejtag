@@ -29,6 +29,7 @@ target_include_directories(lpc845_platform PUBLIC
 )
 
 add_executable(rjtag
+    init.cpp
     main.cpp
 )
 target_link_libraries(rjtag
