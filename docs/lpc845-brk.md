@@ -58,7 +58,15 @@ Something like in a file in `/etc/udev/rules.d/50-cmsis-dap.rules` (copied and m
 SUBSYSTEM=="usb", ATTR{idVendor}=="1fc9", ATTR{idProduct}=="0132", MODE:="666"
 ```
 
-You may need to run `sudo service udev restart` every time your WSL instance starts, because daemons are not kept running in WSL, and this is needed to get `udev` running.
+You may need to run `sudo service udev restart` every time your WSL instance starts, because daemons are not kept running in WSL, and this is needed to get `udev` running.  A workaround is to create `/etc/wsl.conf` with the following contents:
+
+```
+$ cat /etc/wsl.conf
+[boot]
+command="service udev restart"
+```
+
+This means that udev will be restarted on the "boot" of the virtual machine.
 
 ### Manually accessing virtual COM port
 
