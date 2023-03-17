@@ -31,6 +31,7 @@ target_include_directories(lpc845_platform PUBLIC
 add_executable(rjtag
     init.cpp
     main.cpp
+    uart.cpp
 )
 target_link_libraries(rjtag
     lpc845_platform

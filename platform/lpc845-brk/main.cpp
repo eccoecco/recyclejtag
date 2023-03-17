@@ -3,6 +3,7 @@
 #include <LPC845.h>
 
 #include "init.h"
+#include "uart.h"
 
 static void serialEcho();
 
@@ -21,19 +22,13 @@ void serialEcho()
 {
     while (1)
     {
-        uint32_t status = USART0->STAT;
-        if ((status & USART_STAT_RXRDY(1)) != 0)
+        int readCharacter = Uart::ReadCharacter();
+        if (readCharacter < 0)
         {
-            USART0->STAT = UINT32_MAX;
-
-            // Data ready!
-            // If using parity for extra data, then use RXDATSTAT instead
-            uint32_t rxData = USART0->RXDAT;
-
-            ++rxData;
-            rxData &= 0xFF;
-
-            USART0->TXDAT = rxData;
+            continue;
         }
+
+        ++readCharacter;
+        Uart::WriteCharacter(readCharacter & 0xFF);
     }
 }

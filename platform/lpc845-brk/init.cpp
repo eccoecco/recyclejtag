@@ -99,7 +99,7 @@ inline void InitUSART0()
     // Enable, 8N1 data, asynchronous, no flow, no loopback, not inverted
 
     // Enable receive ready interrupt - wait until data is ready to transmit before interested in txrdy
-    // USART0->INTENSET = USART_INTENCLR_RXRDYCLR(1); // | USART_INTENCLR_TXRDYCLR(1);
+    USART0->INTENSET = USART_INTENSET_RXRDYEN(1);
 
     USART0->CFG = USART_CFG_ENABLE(1) | USART_CFG_DATALEN(1);
 }
