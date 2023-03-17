@@ -28,6 +28,8 @@ target_include_directories(lpc845_platform PUBLIC
     "${LPC845_SDK_DIR}/devices/LPC845"
 )
 
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
+
 add_executable(rjtag
     init.cpp
     main.cpp
@@ -35,14 +37,6 @@ add_executable(rjtag
 )
 target_link_libraries(rjtag
     lpc845_platform
-#    librjcore
+    librjcore
 )
 set_target_properties(rjtag PROPERTIES SUFFIX ".elf")
-
-
-#target_compile_features(rjtag PRIVATE cxx_std_20)
-#set_target_properties(rjtag PROPERTIES
-#    CXX_STANDARD_REQUIRED ON
-#    CXX_EXTENSIONS OFF  # -std=c++17 instead of gnu++17
-#)
-
