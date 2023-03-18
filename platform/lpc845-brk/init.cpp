@@ -104,6 +104,24 @@ inline void InitUSART0()
     USART0->CFG = USART_CFG_ENABLE(1) | USART_CFG_DATALEN(1);
 }
 
+template <uint32_t systemFrequency_Hz, uint32_t sysTickFrequency_Hz, bool enableInterrupt> inline void InitSysTick()
+{
+    // Use the divide by 2 clock
+    constexpr uint32_t reloadValue = systemFrequency_Hz / 2 / sysTickFrequency_Hz - 1;
+    // The reload value must fit into 24 bits
+    static_assert((reloadValue & SysTick_LOAD_RELOAD_Msk) == reloadValue,
+                  "System frequency too high, or sys tick frequency too low");
+
+    // Start the systick
+    SysTick->CTRL = 0;
+    SysTick->LOAD = reloadValue;
+    SysTick->VAL = reloadValue;
+    SysTick->CTRL = SysTick_CTRL_ENABLE_Msk | (enableInterrupt ? SysTick_CTRL_TICKINT_Msk : 0);
+    // If want source clock (not divide by 2), then add this: | (1 << SysTick_CTRL_CLKSOURCE_Pos);
+
+    // Note: No need to explicitly enable the NVIC - SysTick will work without __enable_irq()
+}
+
 } // namespace Internal::LPC845
 
 } // namespace
@@ -138,6 +156,9 @@ void InitSystem(void)
 
     // Turn off SWM clock once configured
     SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 & ~static_cast<uint32_t>(1u << SYSCON_SYSAHBCLKCTRL0_SWM_SHIFT);
+
+    // Initialise a nice 1kHz clock
+    Internal::LPC845::InitSysTick<Clocks::FROFrequency_Hz, Clocks::SysTickFrequency_Hz, true>();
 }
 
 } // namespace Init

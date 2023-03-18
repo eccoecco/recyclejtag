@@ -33,6 +33,7 @@ add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
 add_executable(rjtag
     init.cpp
     main.cpp
+    systick.cpp
     uart.cpp
 )
 target_link_libraries(rjtag
