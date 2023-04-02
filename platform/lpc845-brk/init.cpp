@@ -31,12 +31,12 @@ template <uint32_t clockFrequency_Hz> inline void InitFROClock()
 
     // Need to logically OR this, because the reserved bits in this register need to retain
     // their value, as opposed to being "reserved, shouldn't write 1 to this field"
-    SYSCON->FROOSCCTRL = SYSCON->FROOSCCTRL | (1 << SYSCON_FROOSCCTRL_FRO_DIRECT_SHIFT);
+    SYSCON->FROOSCCTRL = SYSCON->FROOSCCTRL | SYSCON_FROOSCCTRL_FRO_DIRECT(1);
 
     // To enable the new clock setting (default is to divide by 2), we have to toggle
     // the FRO direct clock source update register
     SYSCON->FRODIRECTCLKUEN = SYSCON->FRODIRECTCLKUEN & ~0x1u;
-    SYSCON->FRODIRECTCLKUEN = SYSCON->FRODIRECTCLKUEN | (1 << SYSCON_FRODIRECTCLKUEN_ENA_SHIFT);
+    SYSCON->FRODIRECTCLKUEN = SYSCON->FRODIRECTCLKUEN | SYSCON_FRODIRECTCLKUEN_ENA(1);
 
     while ((SYSCON->FRODIRECTCLKUEN & 1) == 0)
     {
@@ -72,7 +72,7 @@ inline void InitUSART0()
 
     constexpr uint32_t ioconMode_PullUp = 2;
     // Pull up, hysteresis enabled, not inverted, disable open drain, bypass input digital filter
-    constexpr uint32_t ioconPinMode = (ioconMode_PullUp << IOCON_PIO_MODE_SHIFT) | (1 << IOCON_PIO_HYS_SHIFT);
+    constexpr uint32_t ioconPinMode = IOCON_PIO_MODE(ioconMode_PullUp) | IOCON_PIO_HYS(1);
 
     IOCON->PIO[IOCON_INDEX_PIO0_24] = ioconPinMode;
     IOCON->PIO[IOCON_INDEX_PIO0_25] = ioconPinMode;
@@ -131,9 +131,8 @@ namespace Init
 
 void InitSystem(void)
 {
-    constexpr uint32_t sysAHBClkCtrl0Flags = (1 << SYSCON_SYSAHBCLKCTRL0_SWM_SHIFT) |
-                                             (1 << SYSCON_SYSAHBCLKCTRL0_UART0_SHIFT) |
-                                             (1 << SYSCON_SYSAHBCLKCTRL0_IOCON_SHIFT);
+    constexpr uint32_t sysAHBClkCtrl0Flags =
+        SYSCON_SYSAHBCLKCTRL0_SWM(1) | SYSCON_SYSAHBCLKCTRL0_UART0(1) | SYSCON_SYSAHBCLKCTRL0_IOCON(1);
 
     SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 | sysAHBClkCtrl0Flags;
 
@@ -155,7 +154,7 @@ void InitSystem(void)
     Internal::LPC845::InitUSART0();
 
     // Turn off SWM clock once configured
-    SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 & ~static_cast<uint32_t>(1u << SYSCON_SYSAHBCLKCTRL0_SWM_SHIFT);
+    SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 & ~static_cast<uint32_t>(SYSCON_SYSAHBCLKCTRL0_SWM(1));
 
     // Initialise a nice 1kHz clock
     Internal::LPC845::InitSysTick<Clocks::FROFrequency_Hz, Clocks::SysTickFrequency_Hz, true>();
