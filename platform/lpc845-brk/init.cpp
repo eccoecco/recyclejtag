@@ -2,6 +2,7 @@
 
 #include <LPC845.h>
 
+#include "gpio.h"
 #include "init.h"
 
 namespace
@@ -122,6 +123,35 @@ template <uint32_t systemFrequency_Hz, uint32_t sysTickFrequency_Hz, bool enable
     // Note: No need to explicitly enable the NVIC - SysTick will work without __enable_irq()
 }
 
+template <int port> constexpr uint32_t IsPortInUse()
+{
+    // int pinsInPort = 0;
+
+    for (const auto &pinMap : Gpio::Mapping::AllPins)
+    {
+        if (pinMap.Port == port)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+template <int port> constexpr uint32_t GenerateDIRSET()
+{
+    uint32_t result = 0;
+    for (const auto &pinMap : Gpio::Mapping::AllPins)
+    {
+        if ((pinMap.Port == port) && (pinMap.Direction == Gpio::PinDirection::Output))
+        {
+            result |= (1u << pinMap.Pin);
+        }
+    }
+
+    return result;
+}
+
 } // namespace Internal::LPC845
 
 } // namespace
@@ -131,8 +161,11 @@ namespace Init
 
 void InitSystem(void)
 {
-    constexpr uint32_t sysAHBClkCtrl0Flags =
-        SYSCON_SYSAHBCLKCTRL0_SWM(1) | SYSCON_SYSAHBCLKCTRL0_UART0(1) | SYSCON_SYSAHBCLKCTRL0_IOCON(1);
+    // Temporarily enable GPIO0, until SPI0 is used to replace it
+    constexpr uint32_t sysAHBClkCtrl0Flags = SYSCON_SYSAHBCLKCTRL0_SWM(1) | SYSCON_SYSAHBCLKCTRL0_UART0(1) |
+                                             SYSCON_SYSAHBCLKCTRL0_IOCON(1) |
+                                             SYSCON_SYSAHBCLKCTRL0_GPIO0(Internal::LPC845::IsPortInUse<0>()) |
+                                             SYSCON_SYSAHBCLKCTRL0_GPIO1(Internal::LPC845::IsPortInUse<1>());
 
     SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 | sysAHBClkCtrl0Flags;
 
@@ -155,6 +188,11 @@ void InitSystem(void)
 
     // Turn off SWM clock once configured
     SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 & ~static_cast<uint32_t>(SYSCON_SYSAHBCLKCTRL0_SWM(1));
+
+    constexpr auto gpioDirset0 = Internal::LPC845::GenerateDIRSET<0>();
+    constexpr auto gpioDirset1 = Internal::LPC845::GenerateDIRSET<1>();
+    GPIO->DIRSET[0] = gpioDirset0;
+    GPIO->DIRSET[1] = gpioDirset1;
 
     // Initialise a nice 1kHz clock
     Internal::LPC845::InitSysTick<Clocks::FROFrequency_Hz, Clocks::SysTickFrequency_Hz, true>();

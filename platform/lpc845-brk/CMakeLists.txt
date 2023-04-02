@@ -31,6 +31,7 @@ target_include_directories(lpc845_platform PUBLIC
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
 
 add_executable(rjtag
+    gpio.cpp
     init.cpp
     main.cpp
     systick.cpp
