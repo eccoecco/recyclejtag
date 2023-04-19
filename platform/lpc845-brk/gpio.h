@@ -79,6 +79,8 @@ constexpr PinMap AllPins[] = {
 
 template <Mapping::PinMap pinMap> inline void SetState(bool setActive)
 {
+    static_assert(pinMap.Direction == PinDirection::Output, "Attempting to set state of non-output pin");
+
     if (setActive == pinMap.IsActiveHigh())
     {
         GPIO->SET[pinMap.Port] = pinMap.BitMask();
@@ -91,6 +93,8 @@ template <Mapping::PinMap pinMap> inline void SetState(bool setActive)
 
 template <Mapping::PinMap pinMap> inline void Toggle()
 {
+    static_assert(pinMap.Direction == PinDirection::Output, "Attempting to toggle state of non-output pin");
+
     GPIO->NOT[pinMap.Port] = pinMap.BitMask();
 }
 
