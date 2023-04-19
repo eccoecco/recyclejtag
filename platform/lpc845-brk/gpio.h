@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <LPC845.h>
+
 #include <array>
 #include <cstdint>
 
@@ -53,6 +55,11 @@ struct PinMap
     {
         return Polarity == PinPolarity::ActiveHigh;
     }
+
+    constexpr uint32_t BitMask() const
+    {
+        return 1 << Pin;
+    }
 };
 
 constexpr PinMap JtagTck{0, 16, PinPolarity::ActiveHigh, PinDirection::Output};
@@ -69,5 +76,27 @@ constexpr PinMap AllPins[] = {
 };
 
 } // namespace Mapping
+
+template <Mapping::PinMap pinMap> inline void SetState(bool setActive)
+{
+    if (setActive == pinMap.IsActiveHigh())
+    {
+        GPIO->SET[pinMap.Port] = pinMap.BitMask();
+    }
+    else
+    {
+        GPIO->CLR[pinMap.Port] = pinMap.BitMask();
+    }
+}
+
+template <Mapping::PinMap pinMap> inline void Toggle()
+{
+    GPIO->NOT[pinMap.Port] = pinMap.BitMask();
+}
+
+template <Mapping::PinMap pinMap> inline bool GetState()
+{
+    return (GPIO->PIN[pinMap.Port] & pinMap.BitMask()) != 0;
+}
 
 } // namespace Gpio
