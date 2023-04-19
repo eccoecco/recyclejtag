@@ -68,6 +68,10 @@ void serialEcho()
         case 'B':
             Gpio::SetState<Gpio::Mapping::DebugBlue>(readCharacter == 'B');
             break;
+        case 'i':
+        case 'I':
+            Uart::WriteCharacter(Gpio::GetState<Gpio::Mapping::JtagTdo>() ? 'H' : 'L');
+            break;
         }
     }
 }
