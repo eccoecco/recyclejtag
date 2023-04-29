@@ -121,7 +121,7 @@ static void RJCore_CheckIdleTime(struct RJCoreHandle *handle, size_t bytesReceiv
         handle->lastRxActivityTime = currentTime;
     }
 #if RJCORE_UART_IDLE_TIMEOUT > 0
-    else if (handle->currentState != &RJCoreState_Handshake)
+    else
     {
         uint32_t idleTime = currentTime - handle->lastRxActivityTime;
 
