@@ -8,10 +8,10 @@
 namespace
 {
 
-constexpr size_t ReceiveBufferSize = 128; //!< Can receive a lot of data from a computer
+constexpr size_t ReceiveBufferSize = 1024; //!< Can receive a lot of data from a computer
 
 /// @brief No need for a big transmit buffer, since the transmit is constrained by the receive
-constexpr size_t TransmitBufferSize = 8;
+constexpr size_t TransmitBufferSize = 256;
 
 template <size_t bufferSize> struct CircularBuffer
 {
