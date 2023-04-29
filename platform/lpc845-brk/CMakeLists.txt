@@ -28,6 +28,10 @@ target_include_directories(lpc845_platform PUBLIC
     "${LPC845_SDK_DIR}/devices/LPC845"
 )
 
+add_compile_definitions(
+    RJCORE_UART_IDLE_TIMEOUT=1000
+)
+
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
 
 add_executable(rjtag
