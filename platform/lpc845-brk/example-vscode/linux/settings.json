@@ -1,0 +1,14 @@
+{
+    "cmake.configureSettings": {
+        "CMAKE_TOOLCHAIN_FILE": "toolchain/arm-none-eabi.cmake"
+    },
+    "cmake.environment": {
+        "ARMGCC_DIR": "${userHome}/opt/arm-gnu-toolchain-12.2.rel1-x86_64-arm-none-eabi",
+        "LPC845_SDK_DIR": "${userHome}/mcuxpresso/sdk-2.13-lpc845"
+    },
+    "cmake.configureOnOpen": true,
+    "files.associations": {
+        "array": "cpp"
+    },
+    "cortex-debug.variableUseNaturalFormat": true
+}
