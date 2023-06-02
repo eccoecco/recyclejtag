@@ -548,6 +548,7 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 
             tdi >>= 1;
             tms >>= 1;
+            tdo >>= 1;
         }
 
         tdo >>= (8 - bitsToToggle);
