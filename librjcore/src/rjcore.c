@@ -544,11 +544,12 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 
         for (int bitIndex = 0; bitIndex < bitsToToggle; ++bitIndex)
         {
+            tdo >>= 1;
+
             tdo |= (*handle->platform->tapShiftGPIO)(handle->privateData, tdi & 1, tms & 1) ? 0x80 : 0x00;
 
             tdi >>= 1;
             tms >>= 1;
-            tdo >>= 1;
         }
 
         tdo >>= (8 - bitsToToggle);
