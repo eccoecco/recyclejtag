@@ -57,9 +57,10 @@ bool SetPortMode(void *, enum RJCorePortMode portMode)
     case RJCorePortMode_PushPull:
         // TODO: Write to DIRSET for the GPIO pins
         break;
+    case RJCorePortMode_OpenDrain:
+        // TODO: Support open drain mode
+        break;
     default:
-        // Don't support open drain mode (or other modes)
-        // Only support high impedance and push-pull
         return false;
     }
 
