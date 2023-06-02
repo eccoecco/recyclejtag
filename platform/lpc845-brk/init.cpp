@@ -188,7 +188,7 @@ void InitSystem(void)
 
     static_assert((Gpio::Mapping::JtagTdo.Port == 0) && (Gpio::Mapping::JtagTdo.Pin == 19),
                   "Assumed that TDO was P0.19");
-    IOCON->PIO[IOCON_INDEX_PIO0_19] = IOCON_PIO_MODE(2) | IOCON_PIO_HYS(1);
+    IOCON->PIO[IOCON_INDEX_PIO0_19] = IOCON_PIO_MODE(1) | IOCON_PIO_HYS(1);
 
     // Turn off SWM clock once configured
     SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 & ~static_cast<uint32_t>(SYSCON_SYSAHBCLKCTRL0_SWM(1));
