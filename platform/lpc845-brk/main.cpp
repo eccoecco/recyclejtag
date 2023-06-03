@@ -138,6 +138,15 @@ int TapShiftGPIOClockCycle(void *, int tdi, int tms)
 }
 #endif
 
+#if LPC845_JTAG_USE_SPI
+// Processes a packet of data - multiple clock cycles.
+// Returns 0 if success, -1 if error.
+int TapShiftPacketSPI(void *, const uint8_t *buffer, int bitsToShift)
+{
+    return 0;
+}
+#endif
+
 } // namespace PlatformImpl
 } // namespace
 
@@ -146,13 +155,21 @@ void startRjCore()
     constexpr RJCorePlatform_TapShiftGPIOClockCycle tapShiftGPIO =
 #if LPC845_JTAG_USE_GPIO
         PlatformImpl::TapShiftGPIOClockCycle;
+    constexpr RJCoreTapShiftMode preferredMode = RJCoreTapShiftMode_GPIO;
+#else
+        nullptr;
+#endif
+    constexpr RJCorePlatform_TapShiftPacket tapShiftPacket =
+#if LPC845_JTAG_USE_SPI
+        PlatformImpl::TapShiftPacketSPI;
+    constexpr RJCoreTapShiftMode preferredMode = RJCoreTapShiftMode_Packet;
 #else
         nullptr;
 #endif
 
     RJCoreHandle rjcoreHandle;
     RJCorePlatform platform{
-        .tapShiftMode = RJCoreTapShiftMode_GPIO,
+        .tapShiftMode = preferredMode,
         .currentUptime = PlatformImpl::CurrentUptime,
         .transmitData = PlatformImpl::TransmitData,
         .setSerialMode = PlatformImpl::SetSerialMode,
@@ -162,7 +179,7 @@ void startRjCore()
         .newTapShift = PlatformImpl::NewTapShift,
         .tapShiftComplete = PlatformImpl::TapShiftComplete,
         .tapShiftGPIO = tapShiftGPIO,
-        .tapShiftPacket = nullptr, // TODO: Use packet mode when doing hardware SPI?
+        .tapShiftPacket = tapShiftPacket,
         .tapShiftCustom = nullptr, // TODO: Or maybe use custom mode?
     };
 
