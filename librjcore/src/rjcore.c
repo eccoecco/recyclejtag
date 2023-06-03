@@ -560,6 +560,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 
     if (handle->stateData.state.tapShift.bitsToShift == 0)
     {
+        if (handle->platform->tapShiftComplete)
+        {
+            (*handle->platform->tapShiftComplete)(handle->privateData);
+        }
+
         // All done!  Back to the binary mode selection
         return (struct RJCoreStateReply){
             .bytesProcessed = 0,
@@ -664,6 +669,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftPacket_Process(struct RJCoreH
         };
     }
 
+    if ((handle->stateData.state.tapShift.bitsToShift == 0) && handle->platform->tapShiftComplete)
+    {
+        (*handle->platform->tapShiftComplete)(handle->privateData);
+    }
+
     return (struct RJCoreStateReply){
         .bytesProcessed = bytesProcessed,
         .nextState = (handle->stateData.state.tapShift.bitsToShift == 0) ? &RJCoreState_BinaryMode : NULL,
@@ -688,6 +698,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftCustom_Process(struct RJCoreH
     if ((*handle->platform->tapShiftCustom)(handle->privateData, data, bytesProcessed, bitsToShift) < 0)
     {
         bytesProcessed = -1;
+    }
+
+    if (handle->platform->tapShiftComplete)
+    {
+        (*handle->platform->tapShiftComplete)(handle->privateData);
     }
 
     return (struct RJCoreStateReply){

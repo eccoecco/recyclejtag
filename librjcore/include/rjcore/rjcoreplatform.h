@@ -61,6 +61,8 @@ typedef void (*RJCorePlatform_ReadVoltages)(void *, uint16_t *values);
 
 typedef void (*RJCorePlatform_NewTapShift)(void *, int totalBitsToShift);
 
+typedef void (*RJCorePlatform_TapShiftComplete)(void *);
+
 enum RJCoreTapShiftMode
 {
     RJCoreTapShiftMode_GPIO,   //!< Jtag done via manual bit bashing
@@ -99,13 +101,15 @@ struct RJCorePlatform
 {
     enum RJCoreTapShiftMode tapShiftMode; //!< Tells us which tap shift callback to use
 
-    RJCorePlatform_CurrentUptime currentUptime; //!< Current uptime
-    RJCorePlatform_TransmitData transmitData;   //!< Used to transmit data
-    RJCorePlatform_SetSerialMode setSerialMode; //!< Set the serial mode
-    RJCorePlatform_SetPortMode setPortMode;     //!< Sets the port mode
-    RJCorePlatform_SetFeature setFeature;       //!< Sets features
-    RJCorePlatform_ReadVoltages readVoltages;   //!< Reads the voltages
-    RJCorePlatform_NewTapShift newTapShift;     //!< New tap shift incoming
+    RJCorePlatform_CurrentUptime currentUptime;       //!< Current uptime
+    RJCorePlatform_TransmitData transmitData;         //!< Used to transmit data
+    RJCorePlatform_SetSerialMode setSerialMode;       //!< Set the serial mode
+    RJCorePlatform_SetPortMode setPortMode;           //!< Sets the port mode
+    RJCorePlatform_SetFeature setFeature;             //!< Sets features
+    RJCorePlatform_ReadVoltages readVoltages;         //!< Reads the voltages
+    RJCorePlatform_NewTapShift newTapShift;           //!< New tap shift incoming
+    RJCorePlatform_TapShiftComplete tapShiftComplete; //!< Tap shift complete
+
     RJCorePlatform_TapShiftGPIOClockCycle
         tapShiftGPIO; //!< Executes one clock of the tap shift (tapShiftMode == RJCoreTapShiftMode_GPIO)
     RJCorePlatform_TapShiftPacket tapShiftPacket; //!< Executes a packet for tap shifting in packet mode

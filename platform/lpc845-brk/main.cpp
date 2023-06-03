@@ -9,6 +9,8 @@
 
 #include <rjcore/rjcore.h>
 
+#define BENCHMARK_TAP_SHIFT 1
+
 static void startRjCore();
 
 int main()
@@ -19,6 +21,20 @@ int main()
 
     return 0;
 }
+
+#if BENCHMARK_TAP_SHIFT
+
+// Set as global, so that you can pause the debugger on the main loop and just
+// examine it in the variable pane
+struct
+{
+    int totalBitsShifted = 0;
+    uint32_t startTime = 0;
+    uint32_t endTime = 0;
+    bool inProgress = false;
+} tapShiftBenchmark;
+
+#endif
 
 namespace
 {
@@ -83,8 +99,29 @@ void ReadVoltages(void *, uint16_t *values)
 
 void NewTapShift(void *, int totalBitsToShift)
 {
-    // Since only doing GPIO for now, no need to track total bits to shift
+#if BENCHMARK_TAP_SHIFT
+    if (totalBitsToShift < tapShiftBenchmark.totalBitsShifted)
+    {
+        return;
+    }
+
+    tapShiftBenchmark.totalBitsShifted = totalBitsToShift;
+    tapShiftBenchmark.startTime = SystemTick::CurrentTick();
+    tapShiftBenchmark.inProgress = true;
+#else
     (void)totalBitsToShift;
+#endif
+}
+
+void TapShiftComplete(void *)
+{
+#if BENCHMARK_TAP_SHIFT
+    if (tapShiftBenchmark.inProgress)
+    {
+        tapShiftBenchmark.endTime = SystemTick::CurrentTick();
+        tapShiftBenchmark.inProgress = false;
+    }
+#endif
 }
 
 // Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
@@ -114,6 +151,7 @@ void startRjCore()
         .setFeature = PlatformImpl::SetFeature,
         .readVoltages = PlatformImpl::ReadVoltages,
         .newTapShift = PlatformImpl::NewTapShift,
+        .tapShiftComplete = PlatformImpl::TapShiftComplete,
         .tapShiftGPIO = PlatformImpl::TapShiftGPIOClockCycle,
         .tapShiftPacket = nullptr, // TODO: Use packet mode when doing hardware SPI?
         .tapShiftCustom = nullptr, // TODO: Or maybe use custom mode?
