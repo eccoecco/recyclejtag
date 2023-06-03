@@ -105,6 +105,39 @@ inline void InitUSART0()
     USART0->CFG = USART_CFG_ENABLE(1) | USART_CFG_DATALEN(1);
 }
 
+#if LPC845_JTAG_USE_SPI
+inline void InitSPI()
+{
+    // Map TCK/TDI/TMS/TDO pins to the same as the GPIO mode:
+    //      TCK P0.16   SCK
+    //      TDI P0.17   MOSI
+    //      TMS P0.18   \CS0
+    //      TDO P0.19   MISO
+
+    // P0.17-P0.19 are potential ADC pins in SWM->PINENABLE0, but ADC is disabled by default, so no action
+    // required there.
+
+    // However, do set the pull down and hystersis filter for MISO
+    IOCON->PIO[IOCON_INDEX_PIO0_19] = IOCON_PIO_MODE(1) | IOCON_PIO_HYS(1);
+
+    // Pin assignment 3 also handles USART2, but this project does not use USART2 (only USART0), so ignore it
+    constexpr uint32_t pinAssignment3 = SWM_PINASSIGN3_U2_RTS_O_MASK | SWM_PINASSIGN3_U2_CTS_I_MASK |
+                                        SWM_PINASSIGN3_U2_SCLK_IO_MASK | SWM_PINASSIGN3_SPI0_SCK_IO(16);
+    constexpr uint32_t pinAssignment4 = SWM_PINASSIGN4_SPI0_MOSI_IO(17) | SWM_PINASSIGN4_SPI0_MISO_IO(19) |
+                                        SWM_PINASSIGN4_SPI0_SSEL0_IO(18) | SWM_PINASSIGN4_SPI0_SSEL1_IO_MASK;
+
+    SWM0->PINASSIGN.PINASSIGN3 = pinAssignment3;
+    SWM0->PINASSIGN.PINASSIGN4 = pinAssignment4;
+
+    // SPI0CLKSEL is index 9, as per 8.6.26
+    SYSCON->FCLKSEL[9] = 0; // Select FRO clock (30 MHz)
+
+    // TODO: Actually configure SPI
+    // TODO: When sending data, RLE the TMS (and invert it) so that we can use \CS0
+    // TODO: Change CPOL/CPHA to match JTAG, and load up TDI with MOSI
+}
+#endif
+
 template <uint32_t systemFrequency_Hz, uint32_t sysTickFrequency_Hz, bool enableInterrupt> inline void InitSysTick()
 {
     // Use the divide by 2 clock
@@ -165,11 +198,19 @@ void InitSystem(void)
     constexpr uint32_t sysAHBClkCtrl0Flags = SYSCON_SYSAHBCLKCTRL0_SWM(1) | SYSCON_SYSAHBCLKCTRL0_UART0(1) |
                                              SYSCON_SYSAHBCLKCTRL0_IOCON(1) |
                                              SYSCON_SYSAHBCLKCTRL0_GPIO0(Internal::LPC845::IsPortInUse<0>()) |
-                                             SYSCON_SYSAHBCLKCTRL0_GPIO1(Internal::LPC845::IsPortInUse<1>());
+                                             SYSCON_SYSAHBCLKCTRL0_GPIO1(Internal::LPC845::IsPortInUse<1>())
+#ifdef LPC845_JTAG_USE_SPI
+                                             | SYSCON_SYSAHBCLKCTRL0_SPI0(1)
+#endif
+        ;
 
     SYSCON->SYSAHBCLKCTRL0 = SYSCON->SYSAHBCLKCTRL0 | sysAHBClkCtrl0Flags;
 
-    constexpr uint32_t presetCtrl0Flags = SYSCON_PRESETCTRL0_IOCON_RST_N(1);
+    constexpr uint32_t presetCtrl0Flags = SYSCON_PRESETCTRL0_IOCON_RST_N(1)
+#ifdef LPC845_JTAG_USE_SPI
+                                          | SYSCON_PRESETCTRL0_SPI0_RST_N(1)
+#endif
+        ;
     SYSCON->PRESETCTRL0 = SYSCON->PRESETCTRL0 & ~presetCtrl0Flags;
     SYSCON->PRESETCTRL0 = SYSCON->PRESETCTRL0 | presetCtrl0Flags;
 
@@ -190,6 +231,10 @@ void InitSystem(void)
     static_assert((Gpio::Mapping::JtagTdo.Port == 0) && (Gpio::Mapping::JtagTdo.Pin == 19),
                   "Assumed that TDO was P0.19");
     IOCON->PIO[IOCON_INDEX_PIO0_19] = IOCON_PIO_MODE(1) | IOCON_PIO_HYS(1);
+#endif
+
+#ifdef LPC845_JTAG_USE_SPI
+    Internal::LPC845::InitSPI();
 #endif
 
     // Turn off SWM clock once configured
