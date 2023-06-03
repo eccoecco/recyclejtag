@@ -124,7 +124,7 @@ void TapShiftComplete(void *)
 #endif
 }
 
-#if USE_JTAG_BITBASH
+#if LPC845_JTAG_USE_GPIO
 // Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
 // Returns 0 if TDO low, 1 if TDO high
 int TapShiftGPIOClockCycle(void *, int tdi, int tms)
@@ -144,7 +144,7 @@ int TapShiftGPIOClockCycle(void *, int tdi, int tms)
 void startRjCore()
 {
     constexpr RJCorePlatform_TapShiftGPIOClockCycle tapShiftGPIO =
-#if USE_JTAG_BITBASH
+#if LPC845_JTAG_USE_GPIO
         PlatformImpl::TapShiftGPIOClockCycle;
 #else
         nullptr;

@@ -62,7 +62,7 @@ struct PinMap
     }
 };
 
-#ifdef USE_JTAG_BITBASH
+#ifdef LPC845_JTAG_USE_GPIO
 constexpr PinMap JtagTck{0, 16, PinPolarity::ActiveHigh, PinDirection::Output};
 constexpr PinMap JtagTdi{0, 17, PinPolarity::ActiveHigh, PinDirection::Output};
 constexpr PinMap JtagTms{0, 18, PinPolarity::ActiveHigh, PinDirection::Output};
@@ -74,7 +74,7 @@ constexpr PinMap DebugGreen{1, 0, PinPolarity::ActiveLow, PinDirection::Output};
 constexpr PinMap DebugBlue{1, 1, PinPolarity::ActiveLow, PinDirection::Output};
 
 constexpr PinMap AllPins[] = {
-#ifdef USE_JTAG_BITBASH
+#ifdef LPC845_JTAG_USE_GPIO
     JtagTck,  JtagTdi,    JtagTms,   JtagTdo,
 #endif
     DebugRed, DebugGreen, DebugBlue,

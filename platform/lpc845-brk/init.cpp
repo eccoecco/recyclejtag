@@ -186,7 +186,7 @@ void InitSystem(void)
 
     Internal::LPC845::InitUSART0();
 
-#ifdef USE_JTAG_BITBASH
+#ifdef LPC845_JTAG_USE_GPIO
     static_assert((Gpio::Mapping::JtagTdo.Port == 0) && (Gpio::Mapping::JtagTdo.Pin == 19),
                   "Assumed that TDO was P0.19");
     IOCON->PIO[IOCON_INDEX_PIO0_19] = IOCON_PIO_MODE(1) | IOCON_PIO_HYS(1);

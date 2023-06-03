@@ -28,8 +28,14 @@ target_include_directories(lpc845_platform PUBLIC
     "${LPC845_SDK_DIR}/devices/LPC845"
 )
 
+# Select one of these JTAG modes:
+#   LPC845_JTAG_USE_GPIO
+#   LPC845_JTAG_USE_SPI
+# When one is selected, put them into the compile definition
+
 add_compile_definitions(
     RJCORE_UART_IDLE_TIMEOUT=1000
+    LPC845_JTAG_USE_GPIO
 )
 
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
