@@ -35,7 +35,7 @@ target_include_directories(lpc845_platform PUBLIC
 
 add_compile_definitions(
     RJCORE_UART_IDLE_TIMEOUT=1000
-    LPC845_JTAG_USE_GPIO
+    LPC845_JTAG_USE_SPI
 )
 
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
