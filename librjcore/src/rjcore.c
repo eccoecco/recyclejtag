@@ -121,7 +121,7 @@ static void RJCore_CheckIdleTime(struct RJCoreHandle *handle, size_t bytesReceiv
         handle->lastRxActivityTime = currentTime;
     }
 #if RJCORE_UART_IDLE_TIMEOUT > 0
-    else if (handle->currentState != &RJCoreState_Handshake)
+    else
     {
         uint32_t idleTime = currentTime - handle->lastRxActivityTime;
 
@@ -544,6 +544,8 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 
         for (int bitIndex = 0; bitIndex < bitsToToggle; ++bitIndex)
         {
+            tdo >>= 1;
+
             tdo |= (*handle->platform->tapShiftGPIO)(handle->privateData, tdi & 1, tms & 1) ? 0x80 : 0x00;
 
             tdi >>= 1;
@@ -558,6 +560,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftGPIO_Process(struct RJCoreHan
 
     if (handle->stateData.state.tapShift.bitsToShift == 0)
     {
+        if (handle->platform->tapShiftComplete)
+        {
+            (*handle->platform->tapShiftComplete)(handle->privateData);
+        }
+
         // All done!  Back to the binary mode selection
         return (struct RJCoreStateReply){
             .bytesProcessed = 0,
@@ -662,6 +669,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftPacket_Process(struct RJCoreH
         };
     }
 
+    if ((handle->stateData.state.tapShift.bitsToShift == 0) && handle->platform->tapShiftComplete)
+    {
+        (*handle->platform->tapShiftComplete)(handle->privateData);
+    }
+
     return (struct RJCoreStateReply){
         .bytesProcessed = bytesProcessed,
         .nextState = (handle->stateData.state.tapShift.bitsToShift == 0) ? &RJCoreState_BinaryMode : NULL,
@@ -686,6 +698,11 @@ static struct RJCoreStateReply RJCoreState_TapShiftCustom_Process(struct RJCoreH
     if ((*handle->platform->tapShiftCustom)(handle->privateData, data, bytesProcessed, bitsToShift) < 0)
     {
         bytesProcessed = -1;
+    }
+
+    if (handle->platform->tapShiftComplete)
+    {
+        (*handle->platform->tapShiftComplete)(handle->privateData);
     }
 
     return (struct RJCoreStateReply){
