@@ -124,6 +124,7 @@ void TapShiftComplete(void *)
 #endif
 }
 
+#if USE_JTAG_BITBASH
 // Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
 // Returns 0 if TDO low, 1 if TDO high
 int TapShiftGPIOClockCycle(void *, int tdi, int tms)
@@ -135,12 +136,20 @@ int TapShiftGPIOClockCycle(void *, int tdi, int tms)
     Gpio::SetState<Gpio::Mapping::JtagTck>(true);
     return Gpio::GetState<Gpio::Mapping::JtagTdo>();
 }
+#endif
 
 } // namespace PlatformImpl
 } // namespace
 
 void startRjCore()
 {
+    constexpr RJCorePlatform_TapShiftGPIOClockCycle tapShiftGPIO =
+#if USE_JTAG_BITBASH
+        PlatformImpl::TapShiftGPIOClockCycle;
+#else
+        nullptr;
+#endif
+
     RJCoreHandle rjcoreHandle;
     RJCorePlatform platform{
         .tapShiftMode = RJCoreTapShiftMode_GPIO,
@@ -152,7 +161,7 @@ void startRjCore()
         .readVoltages = PlatformImpl::ReadVoltages,
         .newTapShift = PlatformImpl::NewTapShift,
         .tapShiftComplete = PlatformImpl::TapShiftComplete,
-        .tapShiftGPIO = PlatformImpl::TapShiftGPIOClockCycle,
+        .tapShiftGPIO = tapShiftGPIO,
         .tapShiftPacket = nullptr, // TODO: Use packet mode when doing hardware SPI?
         .tapShiftCustom = nullptr, // TODO: Or maybe use custom mode?
     };

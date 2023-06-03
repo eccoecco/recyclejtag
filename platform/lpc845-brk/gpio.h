@@ -62,17 +62,22 @@ struct PinMap
     }
 };
 
+#ifdef USE_JTAG_BITBASH
 constexpr PinMap JtagTck{0, 16, PinPolarity::ActiveHigh, PinDirection::Output};
 constexpr PinMap JtagTdi{0, 17, PinPolarity::ActiveHigh, PinDirection::Output};
 constexpr PinMap JtagTms{0, 18, PinPolarity::ActiveHigh, PinDirection::Output};
 constexpr PinMap JtagTdo{0, 19, PinPolarity::ActiveHigh, PinDirection::Input};
+#endif
 
 constexpr PinMap DebugRed{1, 2, PinPolarity::ActiveLow, PinDirection::Output};
 constexpr PinMap DebugGreen{1, 0, PinPolarity::ActiveLow, PinDirection::Output};
 constexpr PinMap DebugBlue{1, 1, PinPolarity::ActiveLow, PinDirection::Output};
 
 constexpr PinMap AllPins[] = {
-    JtagTck, JtagTdi, JtagTms, JtagTdo, DebugRed, DebugGreen, DebugBlue,
+#ifdef USE_JTAG_BITBASH
+    JtagTck,  JtagTdi,    JtagTms,   JtagTdo,
+#endif
+    DebugRed, DebugGreen, DebugBlue,
 };
 
 } // namespace Mapping
