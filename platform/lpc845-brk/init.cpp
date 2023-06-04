@@ -137,7 +137,11 @@ inline void InitSPI()
     // It could either be CPHA=CPOL=0, or CPHA=CPOL=1
     // Now, since the GPIO bit bashing leaves TCK in idle high, we'll try CPHA=CPOL=1
 
-    SPI0->DIV = 9; // Just for debugging, divide by 9 (so SCK should be 30MHz / 10 = 3MHz)
+    // It seems that the UART -> USB VCOM driver on the LPC845BRK drops data if we clock SPI
+    // data back at full data rate.  So rather than make things complicated and have the delay
+    // introduced via UART handling, slow down SPI... so that it ends up not much faster than
+    // GPIO bit bashing =(
+    SPI0->DIV = 399; // 299 too fast?
 
     // Don't actually configure it here, because SPOL0 in the control register is set to
     // adjust \CS0 to the proper value

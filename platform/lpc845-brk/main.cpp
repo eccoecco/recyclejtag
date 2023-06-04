@@ -196,14 +196,8 @@ void ShiftViaSPI(uint8_t tdi, uint8_t tms, int bitsToShift)
 
     Uart::WriteCharacter(tdo);
 
-    {
-        auto tick = SystemTick::CurrentTick();
-
-        while ((SystemTick::CurrentTick() - tick) < 10)
-        {
-            __NOP();
-        }
-    }
+    // Oh goodness - it seems like we need to artificially limit the UART transfer speed?!
+    // Do it by lowering SPI speed
 }
 
 // Processes a packet of data - multiple clock cycles.
