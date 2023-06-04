@@ -124,7 +124,8 @@ inline void InitSPI()
     constexpr uint32_t pinAssignment3 = SWM_PINASSIGN3_U2_RTS_O_MASK | SWM_PINASSIGN3_U2_CTS_I_MASK |
                                         SWM_PINASSIGN3_U2_SCLK_IO_MASK | SWM_PINASSIGN3_SPI0_SCK_IO(16);
     constexpr uint32_t pinAssignment4 = SWM_PINASSIGN4_SPI0_MOSI_IO(17) | SWM_PINASSIGN4_SPI0_MISO_IO(19) |
-                                        SWM_PINASSIGN4_SPI0_SSEL0_IO(18) | SWM_PINASSIGN4_SPI0_SSEL1_IO_MASK;
+                                        SWM_PINASSIGN4_SPI0_SSEL0_IO_MASK | SWM_PINASSIGN4_SPI0_SSEL1_IO_MASK;
+    // SWM_PINASSIGN4_SPI0_SSEL0_IO(18) | SWM_PINASSIGN4_SPI0_SSEL1_IO_MASK;
 
     SWM0->PINASSIGN.PINASSIGN3 = pinAssignment3;
     SWM0->PINASSIGN.PINASSIGN4 = pinAssignment4;

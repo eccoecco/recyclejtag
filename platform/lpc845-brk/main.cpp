@@ -148,7 +148,7 @@ void ShiftViaSPI(uint8_t tdi, uint8_t tms, int bitsToShift)
         SPI_CFG_ENABLE(1) | SPI_CFG_MASTER(1) | SPI_CFG_LSBF(1) | SPI_CFG_CPHA(1) | SPI_CFG_CPOL(1);
 
     int totalBitsShifted = 0;
-    bool currentOutputTms = false;
+    // bool currentOutputTms = false;
     SPI0->CFG = defaultSpiConfigValue;
     uint8_t tdo = 0;
 
@@ -170,13 +170,15 @@ void ShiftViaSPI(uint8_t tdi, uint8_t tms, int bitsToShift)
             tms >>= 1;
         }
 
-        if ((currentPolarity != 0) != currentOutputTms)
-        {
-            currentOutputTms = !currentOutputTms;
-            SPI0->CFG = defaultSpiConfigValue | (currentOutputTms ? SPI_CFG_SPOL0(1) : 0);
-        }
+        /*
+                if ((currentPolarity != 0) != currentOutputTms)
+                {
+                    currentOutputTms = !currentOutputTms;
+                    SPI0->CFG = defaultSpiConfigValue | (currentOutputTms ? SPI_CFG_SPOL0(1) : 0);
+                }*/
+        Gpio::SetState<Gpio::Mapping::JtagTms>(currentPolarity != 0);
 
-        SPI0->TXDATCTL = SPI_TXDATCTL_TXDAT(tdi) | SPI_TXDATCTL_LEN(consecutiveBits);
+        SPI0->TXDATCTL = SPI_TXDATCTL_TXDAT(tdi) | SPI_TXDATCTL_LEN(consecutiveBits - 1);
 
         bitsToShift -= consecutiveBits;
         tdi >>= consecutiveBits;
