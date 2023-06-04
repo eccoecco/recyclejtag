@@ -132,6 +132,15 @@ inline void InitSPI()
     // SPI0CLKSEL is index 9, as per 8.6.26
     SYSCON->FCLKSEL[9] = 0; // Select FRO clock (30 MHz)
 
+    // SPI is configured to change data on falling edge, clock data in on rising edge
+    // It could either be CPHA=CPOL=0, or CPHA=CPOL=1
+    // Now, since the GPIO bit bashing leaves TCK in idle high, we'll try CPHA=CPOL=1
+
+    SPI0->DIV = 9; // Just for debugging, divide by 9 (so SCK should be 30MHz / 10 = 3MHz)
+
+    // Don't actually configure it here, because SPOL0 in the control register is set to
+    // adjust \CS0 to the proper value
+
     // TODO: Actually configure SPI
     // TODO: When sending data, RLE the TMS (and invert it) so that we can use \CS0
     // TODO: Change CPOL/CPHA to match JTAG, and load up TDI with MOSI

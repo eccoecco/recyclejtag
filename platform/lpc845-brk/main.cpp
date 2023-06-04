@@ -29,6 +29,7 @@ int main()
 struct
 {
     int totalBitsShifted = 0;
+    int debugShiftCounter = 0;
     uint32_t startTime = 0;
     uint32_t endTime = 0;
     bool inProgress = false;
@@ -105,6 +106,7 @@ void NewTapShift(void *, int totalBitsToShift)
         return;
     }
 
+    tapShiftBenchmark.debugShiftCounter = 0;
     tapShiftBenchmark.totalBitsShifted = totalBitsToShift;
     tapShiftBenchmark.startTime = SystemTick::CurrentTick();
     tapShiftBenchmark.inProgress = true;
@@ -139,10 +141,82 @@ int TapShiftGPIOClockCycle(void *, int tdi, int tms)
 #endif
 
 #if LPC845_JTAG_USE_SPI
+
+void ShiftViaSPI(uint8_t tdi, uint8_t tms, int bitsToShift)
+{
+    constexpr uint32_t defaultSpiConfigValue =
+        SPI_CFG_ENABLE(1) | SPI_CFG_MASTER(1) | SPI_CFG_LSBF(1) | SPI_CFG_CPHA(1) | SPI_CFG_CPOL(1);
+
+    int totalBitsShifted = 0;
+    bool currentOutputTms = false;
+    SPI0->CFG = defaultSpiConfigValue;
+    uint8_t tdo = 0;
+
+#if BENCHMARK_TAP_SHIFT
+    if (tapShiftBenchmark.inProgress)
+    {
+        tapShiftBenchmark.debugShiftCounter += bitsToShift;
+    }
+#endif
+
+    while (bitsToShift > 0)
+    {
+        int currentPolarity = tms & 1;
+        int consecutiveBits = 0;
+
+        for (int bitIndex = 0; (bitIndex < bitsToShift) && ((tms & 1) == currentPolarity);
+             ++bitIndex, ++consecutiveBits)
+        {
+            tms >>= 1;
+        }
+
+        if ((currentPolarity != 0) != currentOutputTms)
+        {
+            currentOutputTms = !currentOutputTms;
+            SPI0->CFG = defaultSpiConfigValue | (currentOutputTms ? SPI_CFG_SPOL0(1) : 0);
+        }
+
+        SPI0->TXDATCTL = SPI_TXDATCTL_TXDAT(tdi) | SPI_TXDATCTL_LEN(consecutiveBits);
+
+        bitsToShift -= consecutiveBits;
+        tdi >>= consecutiveBits;
+
+        while ((SPI0->STAT & SPI_STAT_RXRDY_MASK) == 0)
+        {
+            // Shouldn't take too long, just spin a few times
+            __NOP();
+        }
+
+        tdo |= static_cast<uint8_t>(SPI0->RXDAT & 0xFF) << totalBitsShifted;
+
+        totalBitsShifted += consecutiveBits;
+    }
+
+    Uart::WriteCharacter(tdo);
+
+    {
+        auto tick = SystemTick::CurrentTick();
+
+        while ((SystemTick::CurrentTick() - tick) < 10)
+        {
+            __NOP();
+        }
+    }
+}
+
 // Processes a packet of data - multiple clock cycles.
 // Returns 0 if success, -1 if error.
 int TapShiftPacketSPI(void *, const uint8_t *buffer, int bitsToShift)
 {
+    for (; bitsToShift > 0; bitsToShift -= 8, buffer += 2)
+    {
+        uint8_t tdi = buffer[0];
+        uint8_t tms = buffer[1];
+        int bitsForData = (bitsToShift > 8) ? 8 : bitsToShift;
+
+        ShiftViaSPI(tdi, tms, bitsForData);
+    }
+
     return 0;
 }
 #endif
