@@ -36,3 +36,6 @@
 
 # Temporary build directories
 build/
+
+# Visual Studio Code setting files
+.vscode/
