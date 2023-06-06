@@ -29,6 +29,7 @@ int main()
 struct
 {
     int totalBitsShifted = 0;
+    int debugShiftCounter = 0;
     uint32_t startTime = 0;
     uint32_t endTime = 0;
     bool inProgress = false;
@@ -105,6 +106,7 @@ void NewTapShift(void *, int totalBitsToShift)
         return;
     }
 
+    tapShiftBenchmark.debugShiftCounter = 0;
     tapShiftBenchmark.totalBitsShifted = totalBitsToShift;
     tapShiftBenchmark.startTime = SystemTick::CurrentTick();
     tapShiftBenchmark.inProgress = true;
@@ -124,6 +126,7 @@ void TapShiftComplete(void *)
 #endif
 }
 
+#if LPC845_JTAG_USE_GPIO
 // Generate a clock cycle (TCK low, TDI = tdi, TMS = tms, pause, TCK high, read TDO)
 // Returns 0 if TDO low, 1 if TDO high
 int TapShiftGPIOClockCycle(void *, int tdi, int tms)
@@ -135,15 +138,108 @@ int TapShiftGPIOClockCycle(void *, int tdi, int tms)
     Gpio::SetState<Gpio::Mapping::JtagTck>(true);
     return Gpio::GetState<Gpio::Mapping::JtagTdo>();
 }
+#endif
+
+#if LPC845_JTAG_USE_SPI
+
+void ShiftViaSPI(uint8_t tdi, uint8_t tms, int bitsToShift)
+{
+    constexpr uint32_t defaultSpiConfigValue =
+        SPI_CFG_ENABLE(1) | SPI_CFG_MASTER(1) | SPI_CFG_LSBF(1) | SPI_CFG_CPHA(1) | SPI_CFG_CPOL(1);
+
+    int totalBitsShifted = 0;
+    // bool currentOutputTms = false;
+    SPI0->CFG = defaultSpiConfigValue;
+    uint8_t tdo = 0;
+
+#if BENCHMARK_TAP_SHIFT
+    if (tapShiftBenchmark.inProgress)
+    {
+        tapShiftBenchmark.debugShiftCounter += bitsToShift;
+    }
+#endif
+
+    while (bitsToShift > 0)
+    {
+        int currentPolarity = tms & 1;
+        int consecutiveBits = 0;
+
+        for (int bitIndex = 0; (bitIndex < bitsToShift) && ((tms & 1) == currentPolarity);
+             ++bitIndex, ++consecutiveBits)
+        {
+            tms >>= 1;
+        }
+
+        /*
+                if ((currentPolarity != 0) != currentOutputTms)
+                {
+                    currentOutputTms = !currentOutputTms;
+                    SPI0->CFG = defaultSpiConfigValue | (currentOutputTms ? SPI_CFG_SPOL0(1) : 0);
+                }*/
+        Gpio::SetState<Gpio::Mapping::JtagTms>(currentPolarity != 0);
+
+        SPI0->TXDATCTL = SPI_TXDATCTL_TXDAT(tdi) | SPI_TXDATCTL_LEN(consecutiveBits - 1);
+
+        bitsToShift -= consecutiveBits;
+        tdi >>= consecutiveBits;
+
+        while ((SPI0->STAT & SPI_STAT_RXRDY_MASK) == 0)
+        {
+            // Shouldn't take too long, just spin a few times
+            __NOP();
+        }
+
+        tdo |= static_cast<uint8_t>(SPI0->RXDAT & 0xFF) << totalBitsShifted;
+
+        totalBitsShifted += consecutiveBits;
+    }
+
+    Uart::WriteCharacter(tdo);
+
+    // Oh goodness - it seems like we need to artificially limit the UART transfer speed?!
+    // Do it by lowering SPI speed
+}
+
+// Processes a packet of data - multiple clock cycles.
+// Returns 0 if success, -1 if error.
+int TapShiftPacketSPI(void *, const uint8_t *buffer, int bitsToShift)
+{
+    for (; bitsToShift > 0; bitsToShift -= 8, buffer += 2)
+    {
+        uint8_t tdi = buffer[0];
+        uint8_t tms = buffer[1];
+        int bitsForData = (bitsToShift > 8) ? 8 : bitsToShift;
+
+        ShiftViaSPI(tdi, tms, bitsForData);
+    }
+
+    return 0;
+}
+#endif
 
 } // namespace PlatformImpl
 } // namespace
 
 void startRjCore()
 {
+    constexpr RJCorePlatform_TapShiftGPIOClockCycle tapShiftGPIO =
+#if LPC845_JTAG_USE_GPIO
+        PlatformImpl::TapShiftGPIOClockCycle;
+    constexpr RJCoreTapShiftMode preferredMode = RJCoreTapShiftMode_GPIO;
+#else
+        nullptr;
+#endif
+    constexpr RJCorePlatform_TapShiftPacket tapShiftPacket =
+#if LPC845_JTAG_USE_SPI
+        PlatformImpl::TapShiftPacketSPI;
+    constexpr RJCoreTapShiftMode preferredMode = RJCoreTapShiftMode_Packet;
+#else
+        nullptr;
+#endif
+
     RJCoreHandle rjcoreHandle;
     RJCorePlatform platform{
-        .tapShiftMode = RJCoreTapShiftMode_GPIO,
+        .tapShiftMode = preferredMode,
         .currentUptime = PlatformImpl::CurrentUptime,
         .transmitData = PlatformImpl::TransmitData,
         .setSerialMode = PlatformImpl::SetSerialMode,
@@ -152,8 +248,8 @@ void startRjCore()
         .readVoltages = PlatformImpl::ReadVoltages,
         .newTapShift = PlatformImpl::NewTapShift,
         .tapShiftComplete = PlatformImpl::TapShiftComplete,
-        .tapShiftGPIO = PlatformImpl::TapShiftGPIOClockCycle,
-        .tapShiftPacket = nullptr, // TODO: Use packet mode when doing hardware SPI?
+        .tapShiftGPIO = tapShiftGPIO,
+        .tapShiftPacket = tapShiftPacket,
         .tapShiftCustom = nullptr, // TODO: Or maybe use custom mode?
     };
 

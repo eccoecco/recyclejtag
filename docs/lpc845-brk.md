@@ -6,6 +6,10 @@ An advantage of the LPC845 is the onboard CMSIS-DAP debug probe, which also doub
 
 In this application, another advantage of the LPC845 itself is that its SPI port allows transfers from 1-16 bits, which is very useful since Jtag is a bit oriented protocol, as opposed to being byte oriented.
 
+Having said all that, though, after some development on it, it would seem that the virtual serial port implemented via the debug probe sometimes drops data when the LPC845 sends data back at 115,200 baud.  I've had to slow data down, otherwise `openocd` just plain fails, because data gets dropped.
+
+This means that there really isn't any point in having fast hardware supported JTAG, since we can't send the data back as fast as the hardware clocks data anyway.  Oh well, at least we've got this working at around 24kbit/s.
+
 ## Initial Setup
 
 ### Obtain arm-none-eabi toolchain

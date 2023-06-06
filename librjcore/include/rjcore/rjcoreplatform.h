@@ -82,6 +82,7 @@ typedef int (*RJCorePlatform_TapShiftGPIOClockCycle)(void *, int tdi, int tms);
 // e.g. If bitsToShift == 13, then you would expect { buffer[0], buffer[1] } to represent
 // the first 8 bits to shift of {tdi, tms}, and then { buffer[2], buffer[3] } to only contain
 // the remaining 5 bits to shift of {tdi, tms} starting from the least significant bit.
+// Note: This callback is responsible for sending tdo back via serial port.
 typedef int (*RJCorePlatform_TapShiftPacket)(void *, const uint8_t *buffer, int bitsToShift);
 
 // Callback for when mode is RJCoreTapShiftMode_Custom
