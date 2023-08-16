@@ -188,6 +188,11 @@ int main(void)
 
     ring_buf_init(&ringbuf, sizeof(ring_buffer), ring_buffer);
 
+    uart_irq_callback_set(dev, interrupt_handler);
+
+    /* Enable rx interrupts */
+    uart_irq_rx_enable(dev);
+
     LOG_INF("Wait for DTR");
 
     while (true)
@@ -232,9 +237,12 @@ int main(void)
         LOG_INF("Baudrate detected: %d", baudrate);
     }
 
-    uart_irq_callback_set(dev, interrupt_handler);
+    gpio_pin_set_dt(&led, 1);
 
-    /* Enable rx interrupts */
-    uart_irq_rx_enable(dev);
+    while (true)
+    {
+        k_sleep(K_SECONDS(10));
+    }
+
     return 0;
 }
