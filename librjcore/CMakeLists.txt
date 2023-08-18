@@ -9,7 +9,7 @@ target_include_directories(librjcore PUBLIC
 # Make all derivative projects inherit the warning flags, as a shortcut
 if(MSVC)
     # Unlikely, but... just in case
-    target_compile_options(librjcore PUBLIC /W4 /WX)
+    target_compile_options(librjcore PRIVATE /W4 /WX)
 else()
-    target_compile_options(librjcore PUBLIC -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(librjcore PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
