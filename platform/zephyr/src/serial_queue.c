@@ -9,12 +9,14 @@ BUILD_ASSERT(TEST_POWER_OF_TWO(SERIAL_QUEUE_ELEMENTS), "Must have a power of two
 
 #define SERIAL_QUEUE_INDEX_MASK ((SERIAL_QUEUE_ELEMENTS)-1)
 
+#define EVENT_UNREAD_DATA_MASK 0x0001
+
 void serial_queue_init(struct serial_queue *queue)
 {
     atomic_set(&queue->write_index, 0);
     atomic_set(&queue->read_index, 0);
 
-    k_msgq_init(&queue->message_queue, queue->msg_queue_buffer, sizeof(uint32_t), MESSAGE_QUEUE_ELEMENTS);
+    k_event_init(&queue->event_unread_data);
 }
 
 static uint32_t serial_queue_space_used(const struct serial_queue *queue)
@@ -32,11 +34,56 @@ static uint32_t serial_queue_space_left(const struct serial_queue *queue)
     return SERIAL_QUEUE_ELEMENTS - 1 - serial_queue_space_used(queue);
 }
 
+static uint32_t serial_queue_wait_for_write(struct serial_queue *queue, k_timeout_t timeout)
+{
+    // Immediately clear first, and then check read/write index, because the write function
+    // updates read/write index, and then sets the event (and thus this must do the opposite)
+    k_event_clear(&queue->event_unread_data, EVENT_UNREAD_DATA_MASK);
+
+    // Handles race condition where a write *just* happened immediately after this clear
+
+    uint32_t bytes_in_queue = serial_queue_space_used(queue);
+
+    if (bytes_in_queue == 0)
+    {
+        if (k_event_wait(&queue->event_unread_data, EVENT_UNREAD_DATA_MASK, false, timeout) != 0)
+        {
+            bytes_in_queue = serial_queue_space_used(queue);
+        }
+    }
+
+    return bytes_in_queue;
+}
+
+static void serial_queue_read_to_buffer(struct serial_queue *queue, void *buffer, size_t length)
+{
+    // TODO: This.  Handle the case of wraparound, as well.
+
+    // Note: No need to manually compare read_index and write_index and set the event,
+    // because that will be done at the start of the next call to serial_queue_read()
+}
+
 // Reads data from the serial queue, waiting a timeout for data to arrive if non already present
 // Returns the amount of data read, or < 0 if an error occurred
 int serial_queue_read(struct serial_queue *queue, void *buffer, size_t length, k_timeout_t timeout)
 {
-    return 0;
+    uint32_t bytes_in_queue = serial_queue_space_used(queue);
+
+    if ((bytes_in_queue == 0) && !K_TIMEOUT_EQ(timeout, K_NO_WAIT))
+    {
+        bytes_in_queue = serial_queue_wait_for_write(queue, timeout);
+    }
+
+    if (bytes_in_queue != 0)
+    {
+        if (bytes_in_queue > length)
+        {
+            bytes_in_queue = length;
+        }
+        serial_queue_read_to_buffer(queue, buffer, bytes_in_queue);
+    }
+
+    return bytes_in_queue;
 }
 
 // Writes data to the queue, returning number of bytes written, or < 0 for an error
@@ -55,7 +102,6 @@ int serial_queue_write(struct serial_queue *queue, const void *buffer, size_t le
     }
 
     uint32_t write_index = atomic_get(&queue->write_index);
-    uint32_t encoded_message = (write_index & 0xFFFF) | (length << 16);
 
     uint32_t maximum_contiguous_write = SERIAL_QUEUE_ELEMENTS - write_index;
     uint32_t initial_write = length;
@@ -79,7 +125,7 @@ int serial_queue_write(struct serial_queue *queue, const void *buffer, size_t le
 
     atomic_set(&queue->write_index, write_index);
 
-    int result = k_msgq_put(&queue->message_queue, &encoded_message, K_NO_WAIT);
+    k_event_set(&queue->event_unread_data, EVENT_UNREAD_DATA_MASK);
 
-    return (result == 0) ? length : result;
+    return length;
 }

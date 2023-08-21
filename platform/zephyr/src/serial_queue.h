@@ -22,8 +22,7 @@ struct serial_queue
     atomic_t write_index;
     atomic_t read_index;
 
-    struct k_msgq message_queue;
-    char __aligned(4) msg_queue_buffer[MESSAGE_QUEUE_ELEMENTS * sizeof(uint32_t)];
+    struct k_event event_unread_data; //!< Set when there's unread data
 };
 
 // Initialises a serial queue
