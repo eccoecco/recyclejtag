@@ -22,7 +22,12 @@
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/usbd.h>
 
+#include "serial_queue.h"
+
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
+
+struct serial_queue usb_rx; //!< Received over USB (to us)
+struct serial_queue usb_tx; //!< Send over USB (to host)
 
 static void on_uart_interrupt(const struct device *dev, void *user_data)
 {
@@ -32,39 +37,44 @@ static void on_uart_interrupt(const struct device *dev, void *user_data)
     {
         if (uart_irq_rx_ready(dev))
         {
-            int recv_len, rb_len;
             uint8_t buffer[64];
+            int length;
 
-            recv_len = uart_fifo_read(dev, buffer, sizeof(buffer));
-            if (recv_len < 0)
+            length = uart_fifo_read(dev, buffer, sizeof(buffer));
+            if (length < 0)
             {
-                LOG_ERR("Failed to read UART FIFO");
-                recv_len = 0;
-            };
+                LOG_ERR("Error reading USB UART: %d", length);
+            }
+            else if (length > 0)
+            {
+                int result = serial_queue_write(&usb_rx, buffer, length);
+
+                if (result != length)
+                {
+                    LOG_ERR("Failed to write to internal serial queue - got %d, expected %d", result, length);
+                }
+            }
         }
 
         if (uart_irq_tx_ready(dev))
         {
-#if 0
             uint8_t buffer[64];
-            int rb_len, send_len;
+            int length;
 
-            rb_len = ring_buf_get(&tx_ringbuf, buffer, sizeof(buffer));
-            if (!rb_len)
+            length = serial_queue_read(&usb_tx, buffer, sizeof(buffer), K_NO_WAIT);
+
+            if (length > 0)
             {
-                LOG_DBG("Ring buffer empty, disable TX IRQ");
+                int result = uart_fifo_fill(dev, buffer, length);
+                if (result != length)
+                {
+                    LOG_ERR("Failed to write to serial port - got %d, expected %d", result, length);
+                }
+            }
+            else
+            {
                 uart_irq_tx_disable(dev);
-                continue;
             }
-
-            send_len = uart_fifo_fill(dev, buffer, rb_len);
-            if (send_len < rb_len)
-            {
-                LOG_ERR("Drop %d bytes", rb_len - send_len);
-            }
-
-            LOG_DBG("ringbuf -> tty fifo %d bytes", send_len);
-#endif
         }
     }
 }
@@ -82,6 +92,9 @@ int main(void)
 {
     const struct device *dev;
     int ret;
+
+    serial_queue_init(&usb_rx);
+    serial_queue_init(&usb_tx);
 
     gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
 
@@ -109,7 +122,10 @@ int main(void)
 
     while (true)
     {
-        k_sleep(K_SECONDS(10));
+        k_sleep(K_SECONDS(1));
+
+        serial_queue_write(&usb_tx, "0123456789abcd\n", 15);
+        uart_irq_tx_enable(dev);
     }
 
     return 0;
