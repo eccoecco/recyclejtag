@@ -57,7 +57,29 @@ static uint32_t serial_queue_wait_for_write(struct serial_queue *queue, k_timeou
 
 static void serial_queue_read_to_buffer(struct serial_queue *queue, void *buffer, size_t length)
 {
-    // TODO: This.  Handle the case of wraparound, as well.
+    uint32_t read_index = atomic_get(&queue->read_index);
+
+    uint32_t maximum_contiguous_read = SERIAL_QUEUE_ELEMENTS - read_index;
+    uint32_t initial_read = length;
+    uint32_t leftover_read = 0;
+
+    if (length > maximum_contiguous_read)
+    {
+        leftover_read = length - maximum_contiguous_read;
+        initial_read = maximum_contiguous_read;
+    }
+
+    memcpy(buffer, queue->serial_buffer + read_index, initial_read);
+
+    if (leftover_read > 0)
+    {
+        memcpy(((uint8_t *)buffer) + initial_read, queue->serial_buffer, leftover_read);
+    }
+
+    read_index += length;
+    read_index &= SERIAL_QUEUE_INDEX_MASK;
+
+    atomic_set(&queue->read_index, read_index);
 
     // Note: No need to manually compare read_index and write_index and set the event,
     // because that will be done at the start of the next call to serial_queue_read()
@@ -67,6 +89,9 @@ static void serial_queue_read_to_buffer(struct serial_queue *queue, void *buffer
 // Returns the amount of data read, or < 0 if an error occurred
 int serial_queue_read(struct serial_queue *queue, void *buffer, size_t length, k_timeout_t timeout)
 {
+    // Maybe instead of checking bytes in queue, always just call serial_queue_wait_for_write()
+    // and have it clear the event, regardless.  Because it doesn't wait for the event if it
+    // finds that the index has changed.
     uint32_t bytes_in_queue = serial_queue_space_used(queue);
 
     if ((bytes_in_queue == 0) && !K_TIMEOUT_EQ(timeout, K_NO_WAIT))
