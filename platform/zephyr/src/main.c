@@ -22,7 +22,10 @@
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/usbd.h>
 
+#include "platform_impl.h"
 #include "serial_queue.h"
+
+#include <rjcore/rjcore.h>
 
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
 
@@ -79,6 +82,15 @@ static void on_uart_interrupt(const struct device *dev, void *user_data)
     }
 }
 
+void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t length)
+{
+    const struct device *dev;
+    dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
+
+    serial_queue_write(&usb_tx, buffer, length);
+    uart_irq_tx_enable(dev);
+}
+
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
 
@@ -87,6 +99,21 @@ static void on_uart_interrupt(const struct device *dev, void *user_data)
  * See the sample documentation for information on how to fix this.
  */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+
+static struct RJCoreHandle rjcoreHandle;
+static struct RJCorePlatform rjcorePlatform = {
+    .tapShiftMode = RJCoreTapShiftMode_GPIO,
+    .currentUptime = PlatformImpl_CurrentUptime,
+    .transmitData = PlatformImpl_TransmitData,
+    .setSerialMode = PlatformImpl_SetSerialMode,
+    .setPortMode = PlatformImpl_SetPortMode,
+    .setFeature = PlatformImpl_SetFeature,
+    .readVoltages = PlatformImpl_ReadVoltages,
+    .newTapShift = PlatformImpl_NewTapShift,
+    .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
+    .tapShiftPacket = NULL,
+    .tapShiftCustom = NULL,
+};
 
 int main(void)
 {
@@ -120,12 +147,15 @@ int main(void)
     /* Enable rx interrupts */
     uart_irq_rx_enable(dev);
 
+    RJCore_Init(&rjcoreHandle, &rjcorePlatform, NULL);
+
     while (true)
     {
-        k_sleep(K_SECONDS(1));
+        uint8_t buffer[64];
 
-        serial_queue_write(&usb_tx, "0123456789abcd\n", 15);
-        uart_irq_tx_enable(dev);
+        int bytesRead = serial_queue_read(&usb_rx, buffer, sizeof(buffer), K_MSEC(100));
+
+        RJCore_NotifyDataReceived(&rjcoreHandle, buffer, bytesRead);
     }
 
     return 0;
