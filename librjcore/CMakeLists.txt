@@ -13,3 +13,9 @@ if(MSVC)
 else()
     target_compile_options(librjcore PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
+
+if(ZEPHYR_BASE)
+    # If building using Zephyr, then need to link this to get proper compiler flags
+    target_link_libraries(librjcore PUBLIC zephyr_interface)
+endif()
+
