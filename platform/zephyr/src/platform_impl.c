@@ -8,7 +8,7 @@ uint32_t PlatformImpl_CurrentUptime(void *)
     return k_uptime_get();
 }
 
-bool PlatformImpl_SetSerialMode(void *privateData, enum RJCoreSerialMode mode)
+bool PlatformImpl_SetSerialMode(void *, enum RJCoreSerialMode mode)
 {
     // USB interface accepts all bauds
     return true;
