@@ -10,6 +10,8 @@ uint32_t PlatformImpl_CurrentUptime(void *)
 
 bool PlatformImpl_SetSerialMode(void *, enum RJCoreSerialMode mode)
 {
+    LOG_INF("Setting serial mode: %d", (int)mode);
+
     // USB interface accepts all bauds
     return true;
 }

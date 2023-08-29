@@ -18,3 +18,8 @@ target_link_libraries(app
     PUBLIC
     librjcore
 )
+
+target_compile_definitions(librjcore
+    PUBLIC
+    RJCORE_UART_IDLE_TIMEOUT=10000
+)
