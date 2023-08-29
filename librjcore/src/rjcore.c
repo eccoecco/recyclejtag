@@ -125,7 +125,7 @@ static void RJCore_CheckIdleTime(struct RJCoreHandle *handle, size_t bytesReceiv
     {
         uint32_t idleTime = currentTime - handle->lastRxActivityTime;
 
-        if (idleTime >= RJCORE_UART_IDLE_TIMEOUT)
+        if ((idleTime >= RJCORE_UART_IDLE_TIMEOUT) && (handle->currentState != &RJCoreState_Handshake))
         {
             // Took too long to receive any data, just reset.
             RJCore_ChangeToState(handle, &RJCoreState_Handshake);
