@@ -1,0 +1,27 @@
+/ {
+    rjtag {
+        compatible = "gpio-keys";
+
+        tck: tck  {
+            gpios = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+        };
+
+        tms: tms  {
+            gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
+        };
+
+        tdo: tdo  {
+            gpios = <&gpio1 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+        };
+
+        tdi: tdi  {
+            gpios = <&gpio1 5 GPIO_ACTIVE_HIGH>;
+        };
+    };
+};
+
+&zephyr_udc0 {
+    cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};
