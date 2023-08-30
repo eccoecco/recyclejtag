@@ -156,6 +156,8 @@ int main(void)
         int bytesRead = serial_queue_read(&usb_rx, buffer, sizeof(buffer), K_MSEC(100));
 
         RJCore_NotifyDataReceived(&rjcoreHandle, buffer, bytesRead);
+
+        gpio_pin_toggle_dt(&led);
     }
 
     return 0;
