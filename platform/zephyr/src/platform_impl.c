@@ -1,7 +1,26 @@
 #include "platform_impl.h"
 
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(rjtag, LOG_LEVEL_INF);
+
+static const struct gpio_dt_spec rjTck = GPIO_DT_SPEC_GET(DT_NODELABEL(tck), gpios);
+static const struct gpio_dt_spec rjTms = GPIO_DT_SPEC_GET(DT_NODELABEL(tms), gpios);
+static const struct gpio_dt_spec rjTdo = GPIO_DT_SPEC_GET(DT_NODELABEL(tdo), gpios);
+static const struct gpio_dt_spec rjTdi = GPIO_DT_SPEC_GET(DT_NODELABEL(tdi), gpios);
+
+void PlatformImpl_Init()
+{
+    // For now, initialise the gpio pins here, but really should be done in set port mode
+    // (to pull it back into high impedance)
+
+    gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
+    gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
+    gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
+    gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
+}
 
 uint32_t PlatformImpl_CurrentUptime(void *)
 {
@@ -54,7 +73,11 @@ void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
 
 int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
 {
-    (void)tdi;
-    (void)tms;
-    return 0;
+    gpio_pin_set_dt(&rjTck, 0);
+    gpio_pin_set_dt(&rjTdi, tdi != 0);
+    gpio_pin_set_dt(&rjTms, tms != 0);
+
+    gpio_pin_set_dt(&rjTck, 1);
+
+    return gpio_pin_get_dt(&rjTdo);
 }

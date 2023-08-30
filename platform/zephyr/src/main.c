@@ -127,6 +127,8 @@ int main(void)
 
     gpio_pin_set_dt(&led, 0);
 
+    PlatformImpl_Init();
+
     dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
     if (!device_is_ready(dev))
     {

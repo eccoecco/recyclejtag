@@ -7,6 +7,8 @@
 
 #include <rjcore/rjcore.h>
 
+void PlatformImpl_Init();
+
 uint32_t PlatformImpl_CurrentUptime(void *);
 bool PlatformImpl_SetSerialMode(void *privateData, enum RJCoreSerialMode mode);
 bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode);
