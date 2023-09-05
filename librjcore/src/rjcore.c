@@ -15,6 +15,13 @@ enum BusPirateCommand
     BusPirateCommand_JtagSpeed = 0x08,
 };
 
+enum BusPirateBitBangCommand
+{
+    BusPirateBitBangCommand_Reset = 0x00,
+    BusPirateBitBangCommand_EnterOpenOCD = 0x06,
+    BusPirateBitBangCommand_ReturnToTerminal = 0x0F,
+};
+
 static void RJCoreState_Handshake_Enter(struct RJCoreHandle *);
 static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle *, const uint8_t *, int);
 static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandle *, const uint8_t *, int);
@@ -250,7 +257,7 @@ static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle
     {
         switch (*data)
         {
-        case BusPirateCommand_Unknown:
+        case BusPirateBitBangCommand_Reset:
             // Bus Pirate says that it should only send a response after 20 consecutive zeroes
             // but that errant zeroes can happen (e.g. during startup), so it is possible that
             // more than 20 consecutive zeroes come streaming in
@@ -265,7 +272,7 @@ static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle
             }
             // Okay to keep on receiving lots of zeroes - it might be that some were errant
             break;
-        case BusPirateCommand_EnterOpenOCD:
+        case BusPirateBitBangCommand_EnterOpenOCD:
             if (handle->stateData.generic.value == 20)
             {
                 (*handle->platform->transmitData)(handle->privateData, "OCD1", 4);
@@ -282,6 +289,10 @@ static struct RJCoreStateReply RJCoreState_Handshake_Process(struct RJCoreHandle
                     .nextState = NULL,
                 };
             }
+            break;
+        case BusPirateBitBangCommand_ReturnToTerminal:
+            // OpenOCD sends this to reset everything back to initial state
+            handle->stateData.generic.value = 0;
             break;
         default:
             // Don't know how to handle this command - just reset to initial state so that
@@ -339,7 +350,7 @@ static struct RJCoreStateReply RJCoreState_BinaryMode_Process(struct RJCoreHandl
             RJCoreState_Transmit_BusPirateIdentifier(handle);
             return (struct RJCoreStateReply){
                 .bytesProcessed = 0,
-                .nextState = &RJCoreState_TapShiftInitialise,
+                .nextState = &RJCoreState_Handshake,
             };
         }
     }
