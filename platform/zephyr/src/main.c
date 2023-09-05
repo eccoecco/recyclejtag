@@ -56,6 +56,9 @@ static void on_uart_interrupt(const struct device *dev, void *user_data)
                 {
                     LOG_ERR("Failed to write to internal serial queue - got %d, expected %d", result, length);
                 }
+
+                // LOG_INF("Rx %d [%02x %02x %02x %02x %02x %02x]", length, buffer[0], buffer[1], buffer[2], buffer[3],
+                //         buffer[4], buffer[5]);
             }
         }
 
@@ -73,6 +76,8 @@ static void on_uart_interrupt(const struct device *dev, void *user_data)
                 {
                     LOG_ERR("Failed to write to serial port - got %d, expected %d", result, length);
                 }
+                // LOG_INF("Tx %d [%02x %02x %02x %02x %02x %02x]", length, buffer[0], buffer[1], buffer[2], buffer[3],
+                //         buffer[4], buffer[5]);
             }
             else
             {
