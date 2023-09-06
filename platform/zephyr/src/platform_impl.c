@@ -108,12 +108,12 @@ void PlatformImpl_ReadVoltages(void *, uint16_t *values)
 
 void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
 {
-    LOG_INF("Starting to shift %d bits", totalBitsToShift);
+    LOG_DBG("Starting to shift %d bits", totalBitsToShift);
 }
 
 void PlatformImpl_TapShiftComplete(void *privateData)
 {
-    LOG_INF("Shift complete");
+    LOG_DBG("Shift complete");
 }
 
 int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
