@@ -22,22 +22,62 @@ static_assert(rjTck.port == rjTms.port, "All jtag pins must be on the same port 
 static_assert(rjTck.port == rjTdo.port, "All jtag pins must be on the same port (TCK/TDO differs)");
 static_assert(rjTck.port == rjTdi.port, "All jtag pins must be on the same port (TCK/TDI differs)");
 
-// static_assert(rjTck.port
+// By assuming all pins are on the same port, we can just do this once:
 constexpr auto rjPortAddress = DT_REG_ADDR(DT_GPIO_CTLR(DT_NODELABEL(tck), gpios));
 
-// TODO: Create a constexpr array of all the valid GPIO port addresses, and then ensure that
-// rjPortAddress is within that array.
-// Do something like:
-//      constexpr uintptr_t address[] = {
-//      #ifdef GPIOA_BASE
-//          GPIOA_BASE,
-//      #endif
-//      #ifdef GPIOB_BASE
-//          GPIOB_BASE,
-//      #endif
-//      ... etc ...
-//      };
-// because each STM32s has different GPIO ports, and not always consecutive
+// STM32s only define GPIOx_BASE if they're present on the device.  Use the BASE address
+// before they're cast to GPIO_TypeDef * as we can directly compare ints with DT_REG_ADDR.
+constexpr int validPortAddresses[] = {
+#ifdef GPIOA_BASE
+    GPIOA_BASE,
+#endif
+#ifdef GPIOB_BASE
+    GPIOB_BASE,
+#endif
+#ifdef GPIOC_BASE
+    GPIOC_BASE,
+#endif
+#ifdef GPIOD_BASE
+    GPIOD_BASE,
+#endif
+#ifdef GPIOE_BASE
+    GPIOE_BASE,
+#endif
+#ifdef GPIOF_BASE
+    GPIOF_BASE,
+#endif
+#ifdef GPIOG_BASE
+    GPIOG_BASE,
+#endif
+#ifdef GPIOH_BASE
+    GPIOH_BASE,
+#endif
+#ifdef GPIOI_BASE
+    GPIOI_BASE,
+#endif
+#ifdef GPIOJ_BASE
+    GPIOJ_BASE,
+#endif
+#ifdef GPIOK_BASE
+    GPIOK_BASE,
+#endif
+};
+
+template <int testAddress> constexpr bool ensureValidPortAddress()
+{
+    for (auto portAddress : validPortAddresses)
+    {
+        if (testAddress == portAddress)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Just a sanity check to make sure that rjPortAddress points to a known GPIOx_BASE address
+static_assert(ensureValidPortAddress<rjPortAddress>(), "Unable to find GPIO controller address in port addresses");
 
 } // namespace
 
@@ -79,6 +119,8 @@ int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bi
             gpioController->BSRR = bsrr;
 
             // just *some* delay, because most JTAG ports can't toggle at 50-100MHz
+            // I need to tune this better, because different STM32s will run at
+            // different speeds.  Maybe I should put this into a KConfig option?
             for (int delay = 3; delay > 0; --delay)
             {
                 __NOP();
