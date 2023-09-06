@@ -106,24 +106,11 @@ void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t len
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
-static struct RJCorePlatform rjcorePlatform = {
-    .tapShiftMode = RJCoreTapShiftMode_GPIO,
-    .currentUptime = PlatformImpl_CurrentUptime,
-    .transmitData = PlatformImpl_TransmitData,
-    .setSerialMode = PlatformImpl_SetSerialMode,
-    .setPortMode = PlatformImpl_SetPortMode,
-    .setFeature = PlatformImpl_SetFeature,
-    .readVoltages = PlatformImpl_ReadVoltages,
-    .newTapShift = PlatformImpl_NewTapShift,
-    .tapShiftComplete = PlatformImpl_TapShiftComplete,
-    .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
-    .tapShiftPacket = NULL,
-    .tapShiftCustom = NULL,
-};
 
 int main(void)
 {
     const struct device *dev;
+    struct RJCorePlatform *rjcorePlatform;
     int ret;
 
     serial_queue_init(&usb_rx);
@@ -133,7 +120,7 @@ int main(void)
 
     gpio_pin_set_dt(&led, 0);
 
-    PlatformImpl_Init();
+    rjcorePlatform = PlatformImpl_Init();
 
     dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
     if (!device_is_ready(dev))
@@ -155,7 +142,7 @@ int main(void)
     /* Enable rx interrupts */
     uart_irq_rx_enable(dev);
 
-    RJCore_Init(&rjcoreHandle, &rjcorePlatform, NULL);
+    RJCore_Init(&rjcoreHandle, rjcorePlatform, NULL);
 
     while (true)
     {

@@ -11,7 +11,22 @@ static const struct gpio_dt_spec rjTms = GPIO_DT_SPEC_GET(DT_NODELABEL(tms), gpi
 static const struct gpio_dt_spec rjTdo = GPIO_DT_SPEC_GET(DT_NODELABEL(tdo), gpios);
 static const struct gpio_dt_spec rjTdi = GPIO_DT_SPEC_GET(DT_NODELABEL(tdi), gpios);
 
-void PlatformImpl_Init()
+static struct RJCorePlatform rjcorePlatform = {
+    .tapShiftMode = RJCoreTapShiftMode_GPIO,
+    .currentUptime = PlatformImpl_CurrentUptime,
+    .transmitData = PlatformImpl_TransmitData,
+    .setSerialMode = PlatformImpl_SetSerialMode,
+    .setPortMode = PlatformImpl_SetPortMode,
+    .setFeature = PlatformImpl_SetFeature,
+    .readVoltages = PlatformImpl_ReadVoltages,
+    .newTapShift = PlatformImpl_NewTapShift,
+    .tapShiftComplete = PlatformImpl_TapShiftComplete,
+    .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
+    .tapShiftPacket = NULL,
+    .tapShiftCustom = NULL,
+};
+
+struct RJCorePlatform *PlatformImpl_Init()
 {
     // For now, initialise the gpio pins here, but really should be done in set port mode
     // (to pull it back into high impedance)
@@ -20,6 +35,8 @@ void PlatformImpl_Init()
     gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
     gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
     gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
+
+    return &rjcorePlatform;
 }
 
 uint32_t PlatformImpl_CurrentUptime(void *)
