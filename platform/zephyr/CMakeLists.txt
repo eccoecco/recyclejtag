@@ -10,6 +10,7 @@ target_sources(app
     src/main.c
     src/platform_impl.c
     src/platform_impl.h
+    src/platform_stm32.cpp
     src/serial_queue.c
     src/serial_queue.h
 )
