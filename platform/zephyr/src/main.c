@@ -115,6 +115,7 @@ static struct RJCorePlatform rjcorePlatform = {
     .setFeature = PlatformImpl_SetFeature,
     .readVoltages = PlatformImpl_ReadVoltages,
     .newTapShift = PlatformImpl_NewTapShift,
+    .tapShiftComplete = PlatformImpl_TapShiftComplete,
     .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
     .tapShiftPacket = NULL,
     .tapShiftCustom = NULL,
