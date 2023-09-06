@@ -22,9 +22,23 @@ static struct RJCorePlatform rjcorePlatform = {
     .newTapShift = PlatformImpl_NewTapShift,
     .tapShiftComplete = PlatformImpl_TapShiftComplete,
     .tapShiftGPIO = PlatformImpl_TapShiftGPIOClock,
-    .tapShiftPacket = NULL,
+    .tapShiftPacket = PlatformImpl_TapShiftPacket,
     .tapShiftCustom = NULL,
 };
+
+// Platforms that implement their own PlatformImpl_TapShiftPacket() must also implement PlatformImpl_HasShiftPacket()
+// but have it return true.  The weak linkage will remove these stub versions.
+__attribute__((weak)) bool PlatformImpl_HasShiftPacket()
+{
+    return false;
+}
+
+__attribute__((weak)) int PlatformImpl_TapShiftPacket(void *, const uint8_t *buffer, int bitsToShift)
+{
+    LOG_ERR("Tap shift not implemented for this platform!");
+
+    return -1;
+}
 
 struct RJCorePlatform *PlatformImpl_Init()
 {
@@ -36,6 +50,16 @@ struct RJCorePlatform *PlatformImpl_Init()
     gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
     gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
 
+    if (PlatformImpl_HasShiftPacket())
+    {
+        LOG_INF("Using tap shift packet mode");
+        rjcorePlatform.tapShiftMode = RJCoreTapShiftMode_Packet;
+    }
+    else
+    {
+        LOG_INF("Using tap shift gpio mode");
+    }
+
     return &rjcorePlatform;
 }
 
@@ -46,8 +70,6 @@ uint32_t PlatformImpl_CurrentUptime(void *)
 
 bool PlatformImpl_SetSerialMode(void *, enum RJCoreSerialMode mode)
 {
-    LOG_INF("Setting serial mode: %d", (int)mode);
-
     // USB interface accepts all bauds
     return true;
 }
