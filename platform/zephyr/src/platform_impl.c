@@ -106,12 +106,14 @@ void PlatformImpl_ReadVoltages(void *, uint16_t *values)
     }
 }
 
-void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
+// Weak linkage for new tap and shift just in case a platform implementation requires
+// platform specific initialisation and cleanup.
+__attribute__((weak)) void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
 {
     LOG_DBG("Starting to shift %d bits", totalBitsToShift);
 }
 
-void PlatformImpl_TapShiftComplete(void *privateData)
+__attribute__((weak)) void PlatformImpl_TapShiftComplete(void *privateData)
 {
     LOG_DBG("Shift complete");
 }
