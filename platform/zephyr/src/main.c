@@ -168,12 +168,11 @@ void testDMA(void)
     // access, and this may conflict with Zephyr drivers.  This is also not as
     // portable between the different STM32 platforms, which is a bit of a pain.
 
-    // We'll just use a general purpose timer (TIM3) - hopefully Zephyr drivers
-    // don't claim this timer.  I suppose I should do a device tree claim for this,
-    // and adjust the driver for timer 3 so that its status is not "okay", and thus
-    // Zephyr is guaranteed to not claim this timer (TODO?).
+    // Need to use TIM1, because that's the only source of timers that can trigger
+    // DMA2.  We need to use DMA2, because DMA1 does not have access to the GPIO
+    // registers.
 
-    TIM_TypeDef *timerBase = TIM3;
+    TIM_TypeDef *timerBase = TIM1;
 
     const uint16_t cr1 = timerBase->CR1;
 
@@ -185,28 +184,72 @@ void testDMA(void)
 
     LOG_INF("Timer free for DMA/GPIO");
 
-    uint32_t currentApb = RCC->APB1ENR;
-    LOG_INF("Current APB: 0x%08x", currentApb);
-    currentApb |= RCC_APB1ENR_TIM3EN;
-    RCC->APB1ENR = currentApb;
+    {
+        uint32_t currentApb = RCC->APB2ENR;
+        LOG_INF("Current APB: 0x%08x", currentApb);
+        currentApb |= RCC_APB2ENR_TIM1EN;
+        RCC->APB2ENR = currentApb;
+        LOG_INF("    New APB: 0x%08x", currentApb);
+    }
+    {
+        // Must use DMA2, because DMA1 is not connected to the GPIO bases
+        uint32_t currentAhb = RCC->AHB1ENR;
+        LOG_INF("Current AHB: 0x%08x", currentAhb);
+        currentAhb |= RCC_AHB1ENR_DMA2EN;
+        RCC->AHB1ENR = currentAhb;
+        LOG_INF("    New AHB: 0x%08x", currentAhb);
+
+        LOG_INF("  Stream 0x%08x", DMA2_Stream0->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream1->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream2->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream3->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream4->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream5->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream6->CR);
+        LOG_INF("  Stream 0x%08x", DMA2_Stream7->CR);
+    }
+
+    {
+        // TIM1_UP is DMA 2, stream 5, channel 6
+
+        // TODO: Verify stream 2 unused
+        DMA2_Stream5->CR = 0;
+
+        //        static const uint32_t clearValue = (0x10000 << led.pin);
+        // LED is active low, so setting the pin turns the LED off
+        static const uint32_t clearValue = (0x1 << led.pin);
+
+        DMA2_Stream5->NDTR = 4; // Can be used to make sure that the GPIO is cleared
+        DMA2_Stream5->PAR = (uint32_t)(&(GPIOC->BSRR));
+        DMA2_Stream5->M0AR = (uint32_t)(&clearValue);
+        DMA2_Stream5->FCR = 0; // Direct mode
+
+        DMA2->HIFCR = 0x0F400;
+
+        DMA2_Stream5->CR = (6 << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) | (2 << DMA_SxCR_PSIZE_Pos) |
+                           DMA_SxCR_CIRC | (1 << DMA_SxCR_DIR_Pos) | DMA_SxCR_EN;
+        LOG_INF("Reconf stream 0x%08x (from 0x%08x to 0x%08x)", DMA2_Stream5->CR, DMA2_Stream5->M0AR,
+                DMA2_Stream5->PAR);
+    }
 
     // Set the timer to be pretty much default up-counting with its clock from the system PLL
     timerBase->CR1 = 0;
     timerBase->CR2 = 0;
     timerBase->SMCR = 0;
-    timerBase->DIER = 0;    // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
-    timerBase->PSC = 47999; // 96MHz system clock / 48kHz = 2000 ticks to get a 1s period
-    timerBase->ARR = 1999;  // 1s period
+    timerBase->DIER = TIM_DIER_UDE; // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
+    timerBase->PSC = 47999;         // 96MHz system clock / 48kHz = 2000 ticks to get a 1s period
+    timerBase->ARR = 1999;          // 1s period
     timerBase->CNT = 0;
 
     timerBase->CCER = 0;   // No output compare
     timerBase->CCR1 = 999; // 50% of the way through
 
-    timerBase->EGR = TIM_EGR_UG;
+    // timerBase->EGR = TIM_EGR_UG;
 
     timerBase->SR = 0; // Clear all status flags
 
     timerBase->CR1 = TIM_CR1_CEN; // Enable timer (TODO: Set URS)
+    LOG_INF("Start: %d (stat: 0x%08x)", DMA2_Stream5->NDTR, DMA2->HISR);
 
     while (true)
     {
@@ -214,15 +257,14 @@ void testDMA(void)
         {
             timerBase->SR = 0;
 
-            LOG_INF("Overflow");
+            LOG_INF("Overflow: %d  (stat: 0x%08x)", DMA2_Stream5->NDTR, DMA2->HISR);
 
-            gpio_pin_set_dt(&led, 0);
+            // gpio_pin_set_dt(&led, 0);
         }
 
         if ((timerBase->SR & TIM_SR_CC1IF) != 0)
         {
             timerBase->SR = 0;
-            LOG_INF("Blarg");
             gpio_pin_set_dt(&led, 1);
         }
 
