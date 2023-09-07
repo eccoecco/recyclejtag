@@ -107,6 +107,8 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
 
+static void testDMA(void);
+
 int main(void)
 {
     const struct device *dev;
@@ -144,6 +146,8 @@ int main(void)
 
     RJCore_Init(&rjcoreHandle, rjcorePlatform, NULL);
 
+    testDMA();
+
     while (true)
     {
         uint8_t buffer[64];
@@ -156,4 +160,76 @@ int main(void)
     }
 
     return 0;
+}
+
+void testDMA(void)
+{
+    // So this is a bit tricky, because I'm going to use direct hardware register
+    // access, and this may conflict with Zephyr drivers.  This is also not as
+    // portable between the different STM32 platforms, which is a bit of a pain.
+
+    // We'll just use a general purpose timer (TIM3) - hopefully Zephyr drivers
+    // don't claim this timer.  I suppose I should do a device tree claim for this,
+    // and adjust the driver for timer 3 so that its status is not "okay", and thus
+    // Zephyr is guaranteed to not claim this timer (TODO?).
+
+    TIM_TypeDef *timerBase = TIM3;
+
+    const uint16_t cr1 = timerBase->CR1;
+
+    if ((cr1 & TIM_CR1_CEN) != 0)
+    {
+        LOG_ERR("Something else is already using the timer!");
+        return;
+    }
+
+    LOG_INF("Timer free for DMA/GPIO");
+
+    uint32_t currentApb = RCC->APB1ENR;
+    LOG_INF("Current APB: 0x%08x", currentApb);
+    currentApb |= RCC_APB1ENR_TIM3EN;
+    RCC->APB1ENR = currentApb;
+
+    // Set the timer to be pretty much default up-counting with its clock from the system PLL
+    timerBase->CR1 = 0;
+    timerBase->CR2 = 0;
+    timerBase->SMCR = 0;
+    timerBase->DIER = 0;    // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
+    timerBase->PSC = 47999; // 96MHz system clock / 48kHz = 2000 ticks to get a 1s period
+    timerBase->ARR = 1999;  // 1s period
+    timerBase->CNT = 0;
+
+    timerBase->CCER = 0;   // No output compare
+    timerBase->CCR1 = 999; // 50% of the way through
+
+    timerBase->EGR = TIM_EGR_UG;
+
+    timerBase->SR = 0; // Clear all status flags
+
+    timerBase->CR1 = TIM_CR1_CEN; // Enable timer (TODO: Set URS)
+
+    while (true)
+    {
+        if ((timerBase->SR & TIM_SR_UIF) != 0)
+        {
+            timerBase->SR = 0;
+
+            LOG_INF("Overflow");
+
+            gpio_pin_set_dt(&led, 0);
+        }
+
+        if ((timerBase->SR & TIM_SR_CC1IF) != 0)
+        {
+            timerBase->SR = 0;
+            LOG_INF("Blarg");
+            gpio_pin_set_dt(&led, 1);
+        }
+
+        k_msleep(10);
+
+        // LOG_INF("Timer: %d", timerBase->CNT);
+    }
+
+    timerBase->CR1 = 0;
 }
