@@ -110,8 +110,6 @@ static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
 
-static void testDMA(void);
-
 int main(void)
 {
     const struct device *dev;
@@ -150,8 +148,6 @@ int main(void)
 
     RJCore_Init(&rjcoreHandle, rjcorePlatform, NULL);
 
-    testDMA();
-
     while (true)
     {
         uint8_t buffer[64];
@@ -166,6 +162,7 @@ int main(void)
     return 0;
 }
 
+#if 0
 void testDMA(void)
 {
     // So this is a bit tricky, because I'm going to use direct hardware register
@@ -326,3 +323,5 @@ void testDMA(void)
 
     timerBase->CR1 = 0;
 }
+
+#endif
