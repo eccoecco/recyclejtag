@@ -99,11 +99,14 @@ void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t len
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
 
+#define SW0_NODE DT_ALIAS(sw0)
+
 /*
  * A build error on this line means your board is unsupported.
  * See the sample documentation for information on how to fix this.
  */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
 
@@ -119,6 +122,7 @@ int main(void)
     serial_queue_init(&usb_tx);
 
     gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
+    gpio_pin_configure_dt(&sw, GPIO_INPUT);
 
     gpio_pin_set_dt(&led, 0);
 
@@ -255,12 +259,30 @@ void testDMA(void)
                 DMA2_Stream1->PAR);
     }
 
+    static uint32_t gpioAIDR = 0;
+    {
+        // TIM1_CH2 is DMA 2, stream 2 channel 6, or stream 6, channel 0 (shared with TIM1_CH{1,2,3})
+        DMA2_Stream2->CR = 0;
+
+        DMA2_Stream2->NDTR = 4;
+        DMA2_Stream2->PAR = (uint32_t)(&(GPIOA->IDR));
+        DMA2_Stream2->M0AR = (uint32_t)(&gpioAIDR);
+        DMA2_Stream2->FCR = 0; // Direct mode
+
+        DMA2->LIFCR = 0x0F400;
+
+        DMA2_Stream2->CR = (6 << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) | (2 << DMA_SxCR_PSIZE_Pos) |
+                           DMA_SxCR_CIRC | (0 << DMA_SxCR_DIR_Pos) | DMA_SxCR_EN;
+        LOG_INF("Reconf stream 2: 0x%08x (from 0x%08x to 0x%08x)", DMA2_Stream2->CR, DMA2_Stream2->M0AR,
+                DMA2_Stream2->PAR);
+    }
+
     // Set the timer to be pretty much default up-counting with its clock from the system PLL
     timerBase->CR1 = TIM_CR1_URS; // Set this so that updating registers via EGR will not send an update event
     timerBase->CR2 = 0;
     timerBase->SMCR = 0;
 
-    timerBase->DIER = TIM_DIER_UDE | TIM_DIER_CC1DE; // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
+    timerBase->DIER = TIM_DIER_UDE | TIM_DIER_CC1DE | TIM_DIER_CC2DE; // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
 
     timerBase->PSC = 47999; // 96MHz system clock / 48kHz = 2000 ticks to get a 1s period
     timerBase->ARR = 1999;  // 1s period
@@ -268,6 +290,7 @@ void testDMA(void)
 
     timerBase->CCER = 0;   // No output compare
     timerBase->CCR1 = 999; // 50% of the way through
+    timerBase->CCR2 = 1900;
 
     timerBase->EGR =
         TIM_EGR_UG; // Update registers now, otherwise update events will fire to the DMA immediately upon enabling
@@ -286,13 +309,16 @@ void testDMA(void)
         {
             timerBase->SR = 0;
 
-            LOG_INF("Overflow 0x%08x: %d %d", sr, DMA2_Stream5->NDTR, DMA2_Stream1->NDTR);
+            LOG_INF("Overflow 0x%08x: %d %d %d", sr, DMA2_Stream5->NDTR, DMA2_Stream1->NDTR, DMA2_Stream2->NDTR);
+
+            // Key is active low, so invert
+            LOG_INF("User button: %d", (gpioAIDR & 1) == 0);
         }
 
         if ((sr & TIM_SR_CC1IF) != 0)
         {
             timerBase->SR = 0;
-            LOG_INF("CC1IF 0x%08x: %d %d", sr, DMA2_Stream5->NDTR, DMA2_Stream1->NDTR);
+            LOG_INF("CC1IF 0x%08x: %d %d %d", sr, DMA2_Stream5->NDTR, DMA2_Stream1->NDTR, DMA2_Stream2->NDTR);
         }
 
         k_msleep(1);
