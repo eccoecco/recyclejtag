@@ -212,7 +212,7 @@ void testDMA(void)
     {
         // TIM1_UP is DMA 2, stream 5, channel 6
 
-        // TODO: Verify stream 2 unused
+        // TODO: Verify stream 5 unused
         DMA2_Stream5->CR = 0;
 
         //        static const uint32_t clearValue = (0x10000 << led.pin);
@@ -226,51 +226,76 @@ void testDMA(void)
 
         DMA2->HIFCR = 0x0F400;
 
+#if 0
         DMA2_Stream5->CR = (6 << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) | (2 << DMA_SxCR_PSIZE_Pos) |
                            DMA_SxCR_CIRC | (1 << DMA_SxCR_DIR_Pos) | DMA_SxCR_EN;
-        LOG_INF("Reconf stream 0x%08x (from 0x%08x to 0x%08x)", DMA2_Stream5->CR, DMA2_Stream5->M0AR,
+#else
+        DMA2_Stream5->CR = (6 << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) | (2 << DMA_SxCR_PSIZE_Pos) |
+                           (1 << DMA_SxCR_DIR_Pos) | DMA_SxCR_EN;
+#endif
+        LOG_INF("Reconf stream 5: 0x%08x (from 0x%08x to 0x%08x)", DMA2_Stream5->CR, DMA2_Stream5->M0AR,
                 DMA2_Stream5->PAR);
+    }
+    {
+        // TIM1_CH1 is DMA 2, stream 1/3 channel 6, or stream 6, channel 0
+        DMA2_Stream1->CR = 0;
+
+        static const uint32_t setValue = (0x10000 << led.pin);
+
+        DMA2_Stream1->NDTR = 4;
+        DMA2_Stream1->PAR = (uint32_t)(&(GPIOC->BSRR));
+        DMA2_Stream1->M0AR = (uint32_t)(&setValue);
+        DMA2_Stream1->FCR = 0; // Direct mode
+
+        DMA2->LIFCR = 0x0F400;
+
+        DMA2_Stream1->CR = (6 << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) | (2 << DMA_SxCR_PSIZE_Pos) |
+                           (1 << DMA_SxCR_DIR_Pos) | DMA_SxCR_EN;
+        LOG_INF("Reconf stream 1: 0x%08x (from 0x%08x to 0x%08x)", DMA2_Stream1->CR, DMA2_Stream1->M0AR,
+                DMA2_Stream1->PAR);
     }
 
     // Set the timer to be pretty much default up-counting with its clock from the system PLL
-    timerBase->CR1 = 0;
+    timerBase->CR1 = TIM_CR1_URS; // Set this so that updating registers via EGR will not send an update event
     timerBase->CR2 = 0;
     timerBase->SMCR = 0;
-    timerBase->DIER = TIM_DIER_UDE; // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
-    timerBase->PSC = 47999;         // 96MHz system clock / 48kHz = 2000 ticks to get a 1s period
-    timerBase->ARR = 1999;          // 1s period
+
+    timerBase->DIER = TIM_DIER_UDE | TIM_DIER_CC1DE; // TODO: Set up DMA requests for UDE, CC1DE, CC2DE
+
+    timerBase->PSC = 47999; // 96MHz system clock / 48kHz = 2000 ticks to get a 1s period
+    timerBase->ARR = 1999;  // 1s period
     timerBase->CNT = 0;
 
     timerBase->CCER = 0;   // No output compare
     timerBase->CCR1 = 999; // 50% of the way through
 
-    // timerBase->EGR = TIM_EGR_UG;
+    timerBase->EGR =
+        TIM_EGR_UG; // Update registers now, otherwise update events will fire to the DMA immediately upon enabling
+    LOG_INF("Status: 0x%08x", timerBase->SR);
 
     timerBase->SR = 0; // Clear all status flags
 
-    timerBase->CR1 = TIM_CR1_CEN; // Enable timer (TODO: Set URS)
-    LOG_INF("Start: %d (stat: 0x%08x)", DMA2_Stream5->NDTR, DMA2->HISR);
+    timerBase->CR1 = TIM_CR1_CEN | TIM_CR1_URS; // Enable timer (TODO: Set URS)
+    LOG_INF("Start: %d %d", DMA2_Stream5->NDTR, DMA2_Stream1->NDTR);
 
     while (true)
     {
-        if ((timerBase->SR & TIM_SR_UIF) != 0)
+        const uint32_t sr = timerBase->SR;
+
+        if ((sr & TIM_SR_UIF) != 0)
         {
             timerBase->SR = 0;
 
-            LOG_INF("Overflow: %d  (stat: 0x%08x)", DMA2_Stream5->NDTR, DMA2->HISR);
-
-            // gpio_pin_set_dt(&led, 0);
+            LOG_INF("Overflow 0x%08x: %d %d", sr, DMA2_Stream5->NDTR, DMA2_Stream1->NDTR);
         }
 
-        if ((timerBase->SR & TIM_SR_CC1IF) != 0)
+        if ((sr & TIM_SR_CC1IF) != 0)
         {
             timerBase->SR = 0;
-            gpio_pin_set_dt(&led, 1);
+            LOG_INF("CC1IF 0x%08x: %d %d", sr, DMA2_Stream5->NDTR, DMA2_Stream1->NDTR);
         }
 
-        k_msleep(10);
-
-        // LOG_INF("Timer: %d", timerBase->CNT);
+        k_msleep(1);
     }
 
     timerBase->CR1 = 0;
