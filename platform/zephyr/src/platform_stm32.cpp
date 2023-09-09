@@ -239,6 +239,14 @@ void SendData(const uint8_t *buffer, int bitsToShift)
 
     __ASSERT(bitsToShift <= MaximumBitsPerBuffer, "Too many bits to shift!");
 
+    if constexpr (false)
+    {
+        LOG_INF("Bits to shift: %d", bitsToShift);
+        const uint32_t idr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->IDR;
+
+        LOG_INF("IDR: 0x%04x", idr);
+    }
+
     // TODO: Proper double buffering
     TxBuffer &txBuffer = TxBuffers[0];
 
@@ -258,11 +266,6 @@ void SendData(const uint8_t *buffer, int bitsToShift)
             bsrr |= ((tms & 1) != 0) ? tmsSetMask : tmsClearMask;
 
             *writeData = bsrr;
-
-            if (txBuffer.ValidWords < 16)
-            {
-                // LOG_INF("x: %08x", bsrr);
-            }
         }
     }
 
@@ -319,25 +322,39 @@ void SendData(const uint8_t *buffer, int bitsToShift)
         constexpr uint32_t tdoInputMask = (1 << rjTdo.pin);
         constexpr uint32_t tdiInputMask = (1 << rjTdi.pin);
         constexpr uint32_t tmsInputMask = (1 << rjTms.pin);
+        constexpr uint32_t tckInputMask = (1 << rjTck.pin);
 
         uint8_t tdo = 0;
 
+        uint8_t tdi = 0;
+        uint8_t tms = 0;
+        uint8_t tck = 0;
+
         for (int bitIndex = 0; bitIndex < 8; ++bitIndex, ++readBuffer)
         {
-            // if (txBuffer.ValidWords < 16)
+            const uint32_t value = *readBuffer;
+
             if constexpr (false)
             {
+                tdi >>= 1;
+                tdi |= ((value & tdiInputMask) != 0) ? 0x80 : 0x00;
+                tms >>= 1;
+                tms |= ((value & tmsInputMask) != 0) ? 0x80 : 0x00;
+                tck >>= 1;
+                tck |= ((value & tckInputMask) != 0) ? 0x80 : 0x00;
+
                 // LOG_INF("%04x", static_cast<uint16_t>(*readBuffer));
-                const uint32_t value = *readBuffer;
-                LOG_INF("Tdi: %d - Tms: %d - Tdo: %d", (value & tdiInputMask) != 0, (value & tmsInputMask) != 0,
-                        (value & tdoInputMask) != 0);
+
+                // LOG_INF("Tdi: %d - Tms: %d - Tdo: %d", (value & tdiInputMask) != 0, (value & tmsInputMask) != 0,
+                //         (value & tdoInputMask) != 0);
             }
             tdo >>= 1;
-            tdo |= (((*readBuffer) & (1 << rjTdo.pin)) != 0) ? 0x80 : 0x00;
+            tdo |= ((value & tdoInputMask) != 0) ? 0x80 : 0x00;
         }
 
         *finalBytes = tdo;
 
+        // LOG_INF("Tdi-Tms: %02x-%02x   Tdo: %02x: Tck: %02x", tdi, tms, tdo, tck);
         // k_usleep(1);
     }
 
@@ -399,6 +416,17 @@ bool PlatformImpl_HasShiftPacket()
         rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckSet, 1);
 #endif
 
+    if constexpr (true)
+    {
+        uint32_t ospeedr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->OSPEEDR;
+        const uint32_t otyper = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->OTYPER;
+        // LOG_INF("OSPEEDR 0x%08x, OTYPER 0x%08x", ospeedr, otyper);
+
+        ospeedr |= 0x5500'0000u;
+
+        reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->OSPEEDR = ospeedr;
+    }
+
     auto timerBase = TIM1;
 
     // Set the timer to be pretty much default up-counting with its clock from the system PLL
@@ -408,8 +436,21 @@ bool PlatformImpl_HasShiftPacket()
 
     timerBase->DIER = TIM_DIER_UDE | TIM_DIER_CC1DE | TIM_DIER_CC2DE; // These will trigger DMA requests
 
-    timerBase->PSC = 23; // 96MHz system clock / (23 + 1) = 4MHz clock
-    // timerBase->PSC = 47999; // 96MHz system clock / (23 + 1) = 4MHz clock
+// timerBase->PSC = 23;   // 96MHz system clock / (23 + 1) = 4MHz clock
+// timerBase->PSC = 2399; // 96MHz system clock / (47 + 1) = 2MHz clock
+#if 0
+    timerBase->PSC = 0;
+    timerBase->ARR = 95; // 4MHz / (3 + 1) = 1MHz clock
+    timerBase->CNT = 0;
+
+    timerBase->CCER = 0;
+    timerBase->CCR1 = 47; // 50% of the way through
+    timerBase->CCR2 = 80;
+#endif
+
+    // timerBase->PSC = 23;   // 96MHz system clock / (23 + 1) = 4MHz clock
+    // timerBase->PSC = 2399; // 96MHz system clock / (47 + 1) = 2MHz clock
+    timerBase->PSC = 23;
     timerBase->ARR = 3; // 4MHz / (3 + 1) = 1MHz clock
     timerBase->CNT = 0;
 
