@@ -438,16 +438,15 @@ bool PlatformImpl_HasShiftPacket()
 
 // timerBase->PSC = 23;   // 96MHz system clock / (23 + 1) = 4MHz clock
 // timerBase->PSC = 2399; // 96MHz system clock / (47 + 1) = 2MHz clock
-#if 0
+#if 1
     timerBase->PSC = 0;
     timerBase->ARR = 95; // 4MHz / (3 + 1) = 1MHz clock
     timerBase->CNT = 0;
 
     timerBase->CCER = 0;
-    timerBase->CCR1 = 47; // 50% of the way through
-    timerBase->CCR2 = 80;
-#endif
-
+    timerBase->CCR1 = 30;
+    timerBase->CCR2 = 60;
+#else
     // timerBase->PSC = 23;   // 96MHz system clock / (23 + 1) = 4MHz clock
     // timerBase->PSC = 2399; // 96MHz system clock / (47 + 1) = 2MHz clock
     timerBase->PSC = 23;
@@ -457,6 +456,7 @@ bool PlatformImpl_HasShiftPacket()
     timerBase->CCER = 0;
     timerBase->CCR1 = 1; // 50% of the way through
     timerBase->CCR2 = 3;
+#endif
 
     timerBase->EGR =
         TIM_EGR_UG; // Update registers now, otherwise update events will fire to the DMA immediately upon enabling
