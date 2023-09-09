@@ -274,6 +274,11 @@ void SendData(const uint8_t *buffer, int bitsToShift)
     ConfigureDMA2Stream<5, DMAStreamEventChannel::Channel6, DMAStreamDirection::PeripheralToMemory,
                         DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled>(
         rjPortAddress + offsetof(GPIO_TypeDef, IDR), ReadData, txBuffer.ValidWords);
+#if 1
+    ConfigureDMA2Stream<2, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
+                        DMACircularMode::Disabled, DMAMemoryIncrementMode::Disabled>(
+        rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckSet, txBuffer.ValidWords);
+#endif
 
     auto timerBase = TIM1;
 
@@ -387,9 +392,12 @@ bool PlatformImpl_HasShiftPacket()
     RCC->APB2ENR = apb2;
     RCC->AHB1ENR = ahb1;
 
+    // Setting this to circular mode seems to fail to fire at times?
+#if 0
     ConfigureDMA2Stream<2, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
                         DMACircularMode::Enabled, DMAMemoryIncrementMode::Disabled>(
         rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckSet, 1);
+#endif
 
     auto timerBase = TIM1;
 
