@@ -183,11 +183,11 @@ inline void ConfigureDMA2Stream(uint32_t peripheralAddress, void *memoryAddress,
                              ((direction == DMAStreamDirection::MemoryToPeripheral) ? (1 << DMA_SxCR_DIR_Pos) : 0) |
                              ((circularMode == DMACircularMode::Enabled) ? DMA_SxCR_CIRC : 0);
 
-    LOG_INF("Configuring stream %d @ %p : 0x%08x <-> 0x%08x", streamNumber, dmaStream, peripheralAddress,
+    LOG_DBG("Configuring stream %d @ %p : 0x%08x <-> 0x%08x", streamNumber, dmaStream, peripheralAddress,
             dmaMemoryAddress);
-    LOG_INF("  Flag clear register: %p = 0x%08x", fcr, flagClearBitmask);
-    LOG_INF("  Control register: 0x%08x", crValue);
-    LOG_INF("  Words: %d", wordsToTransfer);
+    LOG_DBG("  Flag clear register: %p = 0x%08x", fcr, flagClearBitmask);
+    LOG_DBG("  Control register: 0x%08x", crValue);
+    LOG_DBG("  Words: %d", wordsToTransfer);
 
     dmaStream->CR = 0;
     dmaStream->NDTR = wordsToTransfer;
@@ -203,7 +203,7 @@ inline void ConfigureDMA2Stream(uint32_t peripheralAddress, void *memoryAddress,
 namespace DMABuffers
 {
 
-uint32_t tckClear = (0x1'0000 << rjTck.pin);
+uint32_t tckSet = (0x1 << rjTck.pin);
 
 constexpr size_t MaximumBitsPerBuffer = 256;
 
@@ -231,7 +231,7 @@ uint8_t ReassembledData[MaximumBitsPerBuffer / 8];
 
 void SendData(const uint8_t *buffer, int bitsToShift)
 {
-    constexpr uint32_t tckSetMask = (1 << rjTck.pin);
+    constexpr uint32_t tckClearMask = (0x1'0000 << rjTck.pin);
     constexpr uint32_t tdiSetMask = (1 << rjTdi.pin);
     constexpr uint32_t tdiClearMask = (0x1'0000 << rjTdi.pin);
     constexpr uint32_t tmsSetMask = (1 << rjTms.pin);
@@ -253,7 +253,7 @@ void SendData(const uint8_t *buffer, int bitsToShift)
 
         for (int bitIndex = 0; bitIndex < 8; ++bitIndex, tdi >>= 1, tms >>= 1, ++writeData)
         {
-            uint32_t bsrr = tckSetMask;
+            uint32_t bsrr = tckClearMask;
             bsrr |= ((tdi & 1) != 0) ? tdiSetMask : tdiClearMask;
             bsrr |= ((tms & 1) != 0) ? tmsSetMask : tmsClearMask;
 
@@ -261,7 +261,7 @@ void SendData(const uint8_t *buffer, int bitsToShift)
 
             if (txBuffer.ValidWords < 16)
             {
-                LOG_INF("x: %08x", bsrr);
+                // LOG_INF("x: %08x", bsrr);
             }
         }
     }
@@ -270,8 +270,8 @@ void SendData(const uint8_t *buffer, int bitsToShift)
     ConfigureDMA2Stream<1, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
                         DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled>(
         rjPortAddress + offsetof(GPIO_TypeDef, BSRR), txBuffer.RawData, txBuffer.ValidWords);
-    // DMA 2 Stream 2, Channel 6 = TIM1 CH2 (falling edge pin sample)
-    ConfigureDMA2Stream<2, DMAStreamEventChannel::Channel6, DMAStreamDirection::PeripheralToMemory,
+    // DMA 2 Stream 5, Channel 6 = TIM1 UP (falling edge pin sample)
+    ConfigureDMA2Stream<5, DMAStreamEventChannel::Channel6, DMAStreamDirection::PeripheralToMemory,
                         DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled>(
         rjPortAddress + offsetof(GPIO_TypeDef, IDR), ReadData, txBuffer.ValidWords);
 
@@ -282,12 +282,19 @@ void SendData(const uint8_t *buffer, int bitsToShift)
     timerBase->SR = 0;
     timerBase->CR1 = TIM_CR1_CEN | TIM_CR1_URS;
 
-    while (DMA2_Stream2->NDTR != 0)
+    while (DMA2_Stream5->NDTR != 0)
     {
         k_usleep(1);
         __NOP();
         // k_msleep(1000);
         // LOG_INF("Blarghle: %d %d %d", DMA2_Stream1->NDTR, DMA2_Stream2->NDTR, timerBase->CNT);
+    }
+
+    if constexpr (false)
+    {
+        const uint32_t idr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->IDR;
+
+        LOG_INF("IDR: 0x%04x", idr);
     }
 
     // LOG_INF("Done");
@@ -304,19 +311,29 @@ void SendData(const uint8_t *buffer, int bitsToShift)
 
     for (int bitsToProcess = txBuffer.ValidWords; bitsToProcess > 0; bitsToProcess -= 8, ++finalBytes)
     {
+        constexpr uint32_t tdoInputMask = (1 << rjTdo.pin);
+        constexpr uint32_t tdiInputMask = (1 << rjTdi.pin);
+        constexpr uint32_t tmsInputMask = (1 << rjTms.pin);
+
         uint8_t tdo = 0;
 
         for (int bitIndex = 0; bitIndex < 8; ++bitIndex, ++readBuffer)
         {
-            if (txBuffer.ValidWords < 16)
+            // if (txBuffer.ValidWords < 16)
+            if constexpr (false)
             {
-                LOG_INF("%04x", static_cast<uint16_t>(*readBuffer));
+                // LOG_INF("%04x", static_cast<uint16_t>(*readBuffer));
+                const uint32_t value = *readBuffer;
+                LOG_INF("Tdi: %d - Tms: %d - Tdo: %d", (value & tdiInputMask) != 0, (value & tmsInputMask) != 0,
+                        (value & tdoInputMask) != 0);
             }
             tdo >>= 1;
             tdo |= (((*readBuffer) & (1 << rjTdo.pin)) != 0) ? 0x80 : 0x00;
         }
 
         *finalBytes = tdo;
+
+        // k_usleep(1);
     }
 
     // TODO: Pass privateData along
@@ -370,10 +387,9 @@ bool PlatformImpl_HasShiftPacket()
     RCC->APB2ENR = apb2;
     RCC->AHB1ENR = ahb1;
 
-    // This always clears TCK on timer overflow
-    ConfigureDMA2Stream<5, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
+    ConfigureDMA2Stream<2, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
                         DMACircularMode::Enabled, DMAMemoryIncrementMode::Disabled>(
-        rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckClear, 1);
+        rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckSet, 1);
 
     auto timerBase = TIM1;
 
@@ -384,9 +400,9 @@ bool PlatformImpl_HasShiftPacket()
 
     timerBase->DIER = TIM_DIER_UDE | TIM_DIER_CC1DE | TIM_DIER_CC2DE; // These will trigger DMA requests
 
-    // timerBase->PSC = 23; // 96MHz system clock / (23 + 1) = 4MHz clock
-    timerBase->PSC = 47999; // 96MHz system clock / (23 + 1) = 4MHz clock
-    timerBase->ARR = 3;     // 4MHz / (3 + 1) = 1MHz clock
+    timerBase->PSC = 23; // 96MHz system clock / (23 + 1) = 4MHz clock
+    // timerBase->PSC = 47999; // 96MHz system clock / (23 + 1) = 4MHz clock
+    timerBase->ARR = 3; // 4MHz / (3 + 1) = 1MHz clock
     timerBase->CNT = 0;
 
     timerBase->CCER = 0;
