@@ -178,7 +178,7 @@ inline void ConfigureDMA2Stream(uint32_t peripheralAddress, void *memoryAddress,
 
     // In our usage, it's always 32-bits memory/peripheral
     const uint32_t crValue = (static_cast<unsigned>(eventChannel) << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) |
-                             (2 << DMA_SxCR_PSIZE_Pos) | DMA_SxCR_EN |
+                             (2 << DMA_SxCR_PSIZE_Pos) | DMA_SxCR_EN | (3 << DMA_SxCR_PL_Pos) |
                              ((memoryIncrement == DMAMemoryIncrementMode::Enabled) ? DMA_SxCR_MINC : 0) |
                              ((direction == DMAStreamDirection::MemoryToPeripheral) ? (1 << DMA_SxCR_DIR_Pos) : 0) |
                              ((circularMode == DMACircularMode::Enabled) ? DMA_SxCR_CIRC : 0);
