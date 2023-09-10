@@ -117,6 +117,12 @@ enum class DMAMemoryIncrementMode
     Enabled,
 };
 
+enum class DMAErrataHack
+{
+    Disabled,
+    Enabled,
+};
+
 template <unsigned dmaStream> constexpr auto GetDMA2Stream()
 {
     static_assert(dmaStream <= 7, "Only 7 DMA streams present");
@@ -165,9 +171,24 @@ template <unsigned dmaStream> constexpr uint32_t GetDMA2StreamFlagClearBitmask()
 
 // Configures the specified DMA stream.  Only a subset of the full DMA stream functionality is
 template <unsigned streamNumber, DMAStreamEventChannel eventChannel, DMAStreamDirection direction,
-          DMACircularMode circularMode, DMAMemoryIncrementMode memoryIncrement>
+          DMACircularMode circularMode, DMAMemoryIncrementMode memoryIncrement,
+          DMAErrataHack errataHack = DMAErrataHack::Disabled>
 inline void ConfigureDMA2Stream(uint32_t peripheralAddress, void *memoryAddress, uint32_t wordsToTransfer)
 {
+    // If the hack is disabled, then we use what was provided
+    // If, however, the hack is enabled, then swap the peripheral/memory ports
+    constexpr auto errataHackDisabled = (errataHack == DMAErrataHack::Disabled);
+    constexpr auto finalDirection = errataHackDisabled ? direction
+                                    : (direction == DMAStreamDirection::PeripheralToMemory)
+                                        ? DMAStreamDirection::MemoryToPeripheral
+                                        : DMAStreamDirection::PeripheralToMemory;
+    // If we swap the memory and peripheral ports, and memory is incrementing, then need to swap that
+    // increment to the peripheral port instead
+    constexpr auto finalMemoryIncrementEnabled =
+        errataHackDisabled ? (memoryIncrement == DMAMemoryIncrementMode::Enabled) : false;
+    constexpr auto finalPeripheralIncrementEnabled =
+        errataHackDisabled ? false : (memoryIncrement == DMAMemoryIncrementMode::Enabled);
+
     auto dmaStream = GetDMA2Stream<streamNumber>();
     auto fcr = GetDMA2StreamFlagClearRegister<streamNumber>();
     constexpr uint32_t flagClearBitmask = GetDMA2StreamFlagClearBitmask<streamNumber>();
@@ -177,22 +198,23 @@ inline void ConfigureDMA2Stream(uint32_t peripheralAddress, void *memoryAddress,
     const uint32_t dmaMemoryAddress = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(memoryAddress));
 
     // In our usage, it's always 32-bits memory/peripheral
-    const uint32_t crValue = (static_cast<unsigned>(eventChannel) << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) |
-                             (2 << DMA_SxCR_PSIZE_Pos) | DMA_SxCR_EN | (3 << DMA_SxCR_PL_Pos) |
-                             ((memoryIncrement == DMAMemoryIncrementMode::Enabled) ? DMA_SxCR_MINC : 0) |
-                             ((direction == DMAStreamDirection::MemoryToPeripheral) ? (1 << DMA_SxCR_DIR_Pos) : 0) |
-                             ((circularMode == DMACircularMode::Enabled) ? DMA_SxCR_CIRC : 0);
+    const uint32_t crValue =
+        (static_cast<unsigned>(eventChannel) << DMA_SxCR_CHSEL_Pos) | (2 << DMA_SxCR_MSIZE_Pos) |
+        (2 << DMA_SxCR_PSIZE_Pos) | DMA_SxCR_EN | (3 << DMA_SxCR_PL_Pos) |
+        (finalMemoryIncrementEnabled ? DMA_SxCR_MINC : 0) | (finalPeripheralIncrementEnabled ? DMA_SxCR_PINC : 0) |
+        ((finalDirection == DMAStreamDirection::MemoryToPeripheral) ? (1 << DMA_SxCR_DIR_Pos) : 0) |
+        ((circularMode == DMACircularMode::Enabled) ? DMA_SxCR_CIRC : 0);
 
-    LOG_DBG("Configuring stream %d @ %p : 0x%08x <-> 0x%08x", streamNumber, dmaStream, peripheralAddress,
+    LOG_INF("Configuring stream %d @ %p : 0x%08x <-> 0x%08x", streamNumber, dmaStream, peripheralAddress,
             dmaMemoryAddress);
-    LOG_DBG("  Flag clear register: %p = 0x%08x", fcr, flagClearBitmask);
-    LOG_DBG("  Control register: 0x%08x", crValue);
-    LOG_DBG("  Words: %d", wordsToTransfer);
+    LOG_INF("  Flag clear register: %p = 0x%08x", fcr, flagClearBitmask);
+    LOG_INF("  Control register: 0x%08x", crValue);
+    LOG_INF("  Words: %d", wordsToTransfer);
 
     dmaStream->CR = 0;
     dmaStream->NDTR = wordsToTransfer;
-    dmaStream->PAR = peripheralAddress;
-    dmaStream->M0AR = dmaMemoryAddress;
+    dmaStream->PAR = errataHackDisabled ? peripheralAddress : dmaMemoryAddress;
+    dmaStream->M0AR = errataHackDisabled ? dmaMemoryAddress : peripheralAddress;
     dmaStream->FCR = 0;
 
     *fcr = flagClearBitmask;
@@ -218,7 +240,7 @@ enum class BufferMode
 
 struct TxBuffer
 {
-    uint32_t RawData[MaximumBitsPerBuffer];
+    uint32_t RawData[MaximumBitsPerBuffer * 2];
     unsigned ValidWords = 0;
     BufferMode Mode = BufferMode::Unused;
 };
@@ -231,6 +253,7 @@ uint8_t ReassembledData[MaximumBitsPerBuffer / 8];
 
 void SendData(const uint8_t *buffer, int bitsToShift)
 {
+    constexpr uint32_t tckSetMask = (1 << rjTck.pin);
     constexpr uint32_t tckClearMask = (0x1'0000 << rjTck.pin);
     constexpr uint32_t tdiSetMask = (1 << rjTdi.pin);
     constexpr uint32_t tdiClearMask = (0x1'0000 << rjTdi.pin);
@@ -239,7 +262,7 @@ void SendData(const uint8_t *buffer, int bitsToShift)
 
     __ASSERT(bitsToShift <= MaximumBitsPerBuffer, "Too many bits to shift!");
 
-    if constexpr (false)
+    if constexpr (true)
     {
         LOG_INF("Bits to shift: %d", bitsToShift);
         const uint32_t idr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->IDR;
@@ -259,29 +282,47 @@ void SendData(const uint8_t *buffer, int bitsToShift)
         uint8_t tdi = buffer[0];
         uint8_t tms = buffer[1];
 
-        for (int bitIndex = 0; bitIndex < 8; ++bitIndex, tdi >>= 1, tms >>= 1, ++writeData)
+        for (int bitIndex = 0; bitIndex < 8; ++bitIndex, tdi >>= 1, tms >>= 1)
         {
             uint32_t bsrr = tckClearMask;
             bsrr |= ((tdi & 1) != 0) ? tdiSetMask : tdiClearMask;
             bsrr |= ((tms & 1) != 0) ? tmsSetMask : tmsClearMask;
 
             *writeData = bsrr;
+
+            ++writeData;
+
+            *writeData = tckSetMask;
+
+            ++writeData;
         }
     }
 
-    // DMA 2 Stream 1, Channel 6 = TIM1 CH1 (rising edge)
-    ConfigureDMA2Stream<1, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
-                        DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled>(
-        rjPortAddress + offsetof(GPIO_TypeDef, BSRR), txBuffer.RawData, txBuffer.ValidWords);
+    if constexpr (sizeof(TxBuffer::RawData) == 2 * MaximumBitsPerBuffer * 4)
+    {
+        // Raw data holds both falling edge and rising edge data
+        // DMA 2 Stream 6, Channel 0 = can be triggered by both TIM1_CH1, and TIM1_CH2
+        ConfigureDMA2Stream<6, DMAStreamEventChannel::Channel0, DMAStreamDirection::MemoryToPeripheral,
+                            DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled, DMAErrataHack::Enabled>(
+            rjPortAddress + offsetof(GPIO_TypeDef, BSRR), txBuffer.RawData, txBuffer.ValidWords * 2);
+    }
+    else
+    {
+        // Raw data only holds the falling edge data
+        // DMA 2 Stream 1, Channel 6 = TIM1 CH1 (rising edge)
+        ConfigureDMA2Stream<1, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
+                            DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled, DMAErrataHack::Enabled>(
+            rjPortAddress + offsetof(GPIO_TypeDef, BSRR), txBuffer.RawData, txBuffer.ValidWords);
+#if 1
+        ConfigureDMA2Stream<2, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
+                            DMACircularMode::Disabled, DMAMemoryIncrementMode::Disabled, DMAErrataHack::Enabled>(
+            rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckSet, txBuffer.ValidWords);
+#endif
+    }
     // DMA 2 Stream 5, Channel 6 = TIM1 UP (falling edge pin sample)
     ConfigureDMA2Stream<5, DMAStreamEventChannel::Channel6, DMAStreamDirection::PeripheralToMemory,
                         DMACircularMode::Disabled, DMAMemoryIncrementMode::Enabled>(
         rjPortAddress + offsetof(GPIO_TypeDef, IDR), ReadData, txBuffer.ValidWords);
-#if 1
-    ConfigureDMA2Stream<2, DMAStreamEventChannel::Channel6, DMAStreamDirection::MemoryToPeripheral,
-                        DMACircularMode::Disabled, DMAMemoryIncrementMode::Disabled>(
-        rjPortAddress + offsetof(GPIO_TypeDef, BSRR), &DMABuffers::tckSet, txBuffer.ValidWords);
-#endif
 
     auto timerBase = TIM1;
 
@@ -290,15 +331,39 @@ void SendData(const uint8_t *buffer, int bitsToShift)
     timerBase->SR = 0;
     timerBase->CR1 = TIM_CR1_CEN | TIM_CR1_URS;
 
-    while (DMA2_Stream5->NDTR != 0)
+    // while (DMA2_Stream5->NDTR != 0)
+    LOG_INF("DMA2->HISR %08x", DMA2->HISR);
+    while ((DMA2->HISR & 0x0800) == 0) // Wait until stream 5 complete
     {
         k_usleep(1);
-        __NOP();
+        //__NOP();
         // k_msleep(1000);
+
+        static unsigned lastCounter = 0;
+        unsigned currentCounter = timerBase->CNT;
+
+        if (lastCounter != currentCounter)
+        {
+            switch (currentCounter)
+            {
+            case 49:
+            case 50:
+            // case 51:
+            // case 69:
+            // case 70:
+            case 71:
+                // LOG_INF("%d: IDR %04x", currentCounter, GPIOB->IDR);
+                break;
+            }
+        }
+
+        lastCounter = currentCounter;
+
         // LOG_INF("Blarghle: %d %d %d", DMA2_Stream1->NDTR, DMA2_Stream2->NDTR, timerBase->CNT);
     }
+    LOG_INF("DMA2->HISR %08x", DMA2->HISR);
 
-    if constexpr (false)
+    if constexpr (true)
     {
         const uint32_t idr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->IDR;
 
@@ -317,6 +382,11 @@ void SendData(const uint8_t *buffer, int bitsToShift)
     const uint32_t *readBuffer = ReadData;
     uint8_t *finalBytes = ReassembledData;
 
+    for (int i = 0; i < 5; ++i)
+    {
+        LOG_INF("idr %04x", readBuffer[i]);
+    }
+
     for (int bitsToProcess = txBuffer.ValidWords; bitsToProcess > 0; bitsToProcess -= 8, ++finalBytes)
     {
         constexpr uint32_t tdoInputMask = (1 << rjTdo.pin);
@@ -334,7 +404,7 @@ void SendData(const uint8_t *buffer, int bitsToShift)
         {
             const uint32_t value = *readBuffer;
 
-            if constexpr (false)
+            if constexpr (true)
             {
                 tdi >>= 1;
                 tdi |= ((value & tdiInputMask) != 0) ? 0x80 : 0x00;
@@ -354,8 +424,8 @@ void SendData(const uint8_t *buffer, int bitsToShift)
 
         *finalBytes = tdo;
 
-        // LOG_INF("Tdi-Tms: %02x-%02x   Tdo: %02x: Tck: %02x", tdi, tms, tdo, tck);
-        // k_usleep(1);
+        LOG_INF("Tdi-Tms: %02x-%02x   Tdo: %02x: Tck: %02x", tdi, tms, tdo, tck);
+        k_usleep(1);
     }
 
     // TODO: Pass privateData along
@@ -420,9 +490,10 @@ bool PlatformImpl_HasShiftPacket()
     {
         uint32_t ospeedr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->OSPEEDR;
         const uint32_t otyper = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->OTYPER;
-        // LOG_INF("OSPEEDR 0x%08x, OTYPER 0x%08x", ospeedr, otyper);
+        const uint32_t pupdr = reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->PUPDR;
+        LOG_INF("OSPEEDR 0x%08x, OTYPER 0x%08x, pupdr 0x%08x", ospeedr, otyper, pupdr);
 
-        ospeedr |= 0x5500'0000u;
+        ospeedr |= 0xaa00'0000u;
 
         reinterpret_cast<GPIO_TypeDef *>(rjPortAddress)->OSPEEDR = ospeedr;
     }
@@ -439,13 +510,15 @@ bool PlatformImpl_HasShiftPacket()
 // timerBase->PSC = 23;   // 96MHz system clock / (23 + 1) = 4MHz clock
 // timerBase->PSC = 2399; // 96MHz system clock / (47 + 1) = 2MHz clock
 #if 1
-    timerBase->PSC = 0;
+    timerBase->PSC = 100;
     timerBase->ARR = 95; // 4MHz / (3 + 1) = 1MHz clock
     timerBase->CNT = 0;
 
     timerBase->CCER = 0;
     timerBase->CCR1 = 30;
     timerBase->CCR2 = 60;
+    timerBase->CCR1 = 50;
+    timerBase->CCR2 = 70;
 #else
     // timerBase->PSC = 23;   // 96MHz system clock / (23 + 1) = 4MHz clock
     // timerBase->PSC = 2399; // 96MHz system clock / (47 + 1) = 2MHz clock
