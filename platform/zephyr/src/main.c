@@ -110,6 +110,7 @@ static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
 
+#if 0
 int main(void)
 {
     const struct device *dev;
@@ -161,6 +162,7 @@ int main(void)
 
     return 0;
 }
+#endif
 
 #if 0
 void testDMA(void)
@@ -325,3 +327,51 @@ void testDMA(void)
 }
 
 #endif
+
+// #define CLOCKS_FULL_SPEED
+// Want a 1MHz clock, but do some shenanigans with phases, so want 4 ticks
+// The system clock is 96MHz, so 96/4 = 24, so the prescaler is 24-1=23
+#ifdef CLOCKS_FULL_SPEED
+static const unsigned TimerPrescaler = 23;
+static const unsigned TimerPeriod = 3;
+#else
+// Debugging at 1Hz
+static const unsigned TimerPrescaler = 47999;
+static const unsigned TimerPeriod = 1999;
+#endif
+
+static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, unsigned outputTriggerChannel,
+                                bool enableBothChannels)
+{
+    // TODO: Check power busses
+
+    const unsigned CCMR_OCM_PWMMode2 = 7;
+    const unsigned TimerHalfPeriod = (TimerPeriod + 1) / 2 - 1;
+
+    timerBase->CR1 = 0; // Disable timer
+    timerBase->CR2 = outputTriggerChannel << TIM_CR2_MMS_Pos;
+    timerBase->SMCR =
+        (inputTrigger
+         << TIM_SMCR_TS_Pos); // 5 or 6 << TIM_SMCR_SMS_Pos; // TODO: Change this for gated or trigger mode as needs be
+    timerBase->DIER = 0;
+    timerBase->CCMR1 = CCMR_OCM_PWMMode2 << TIM_CCMR1_OC1M_Pos; // Set PWM mode 2
+    timerBase->CCMR2 = enableBothChannels ? (CCMR_OCM_PWMMode2 << TIM_CCMR2_OC4M_Pos) : 0;
+    timerBase->CCER = TIM_CCER_CC1E | (enableBothChannels ? TIM_CCER_CC4E : 0);
+
+    timerBase->CNT = 0;
+    timerBase->PSC = TimerPrescaler;
+    timerBase->ARR = TimerPeriod;
+
+    timerBase->CCR1 = TimerHalfPeriod;
+    timerBase->CCR4 = TimerHalfPeriod;
+
+    timerBase->SR = 0;
+    timerBase->EGR = 0;
+}
+
+int main(void)
+{
+    // This bit tests the timers
+
+    return 0;
+}
