@@ -125,3 +125,47 @@ Obviously, the SPI periperhals will need DMA set up for them.  Hopefully
 we won't experience the same data corruption as we did as in the previous
 setup.
 
+#### Provisional Peripheral Choices
+
+Referring to the board pin mapping of the [Blackpill F411CE](https://docs.zephyrproject.org/latest/boards/arm/blackpill_f411ce/doc/index.html),
+I'm going to try and keep all the JTAG pins on PORTB/left hand side of
+the board.  Mainly so that I can easily swap it back to bitbashing mode
+(which assumes all pins are on a single port) without much hassle.
+
+The SCK pins are not considered JTAG signals, and I'm going to put the
+SCK + Timer pulses on the right hand side.
+
+This means using:
+* TMS: SPI1 - MISO1 - PB4 (left hand side)
+* TDI: SPI2 - MISO2 - PB14 (left hand side)
+* TDO: SPI2 - MOSI2 - PB15 (left hand side)
+* TCK: TIMER4 - CH1 - PB6 (left hand side)
+* SPI1 - SCK1  - PA5 (right hand side)
+* Source of SCK1: TIMER3 - CH1 - PA6 (right hand side, neighbours PA5 - can use a jumper)
+* SPI2 - SCK2 - PB10 (right hand side)
+* Source of SCK2: TIMER3 - CH4 - PB1 (right hand side, two pins away from PB10 - have to use a wire)
+
+Given the timer's internal connections of ITRn and TRIGO, we thus have:
+
+```
+          +-> TIMER5 --> TIMER3 -> SCK
+          |   ITR0       ITR2
+TIMER2 ---+
+          |
+          +-> TIMER1 --> TIMER4 -> TCK
+              ITR1       ITR0
+```
+
+I'm constrained by pin mapping to use TIMER3 and TIMER4 as the outputs.
+Remember I want to keep TCK on PORTB, and while I technically
+could use PB3, that's hilarious the board's JTDO pin, which I think
+would be hilarious to try and preserve.  I've had to replace JTRST with
+MISO1 (because I can't find another MISO pin on PORTB), but I think that
+JTRST is sometimes optional, so not too fussed.
+
+Timer 3 is the only timer out of Timers 2, 3, and 4 to accept Timer 5
+as its input, and so Timer 5 was placed there due to the constraints.
+However, Timer 5 does *not* accept Timer 1 as its inputs, which meant
+that Timer 1 was linked to Timer 4.  Timer 5 and Timer 1 does both
+accept Timer 2 as its trigger input though, and thus the layout was
+decided.
