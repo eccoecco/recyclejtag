@@ -13,6 +13,7 @@
 #include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/uart/cdc_acm.h>
 #include <zephyr/kernel.h>
@@ -28,6 +29,8 @@
 #include <rjcore/rjcore.h>
 
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
+
+#if 0
 
 struct serial_queue usb_rx; //!< Received over USB (to us)
 struct serial_queue usb_tx; //!< Send over USB (to host)
@@ -110,7 +113,6 @@ static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
 
-#if 0
 int main(void)
 {
     const struct device *dev;
@@ -340,16 +342,51 @@ static const unsigned TimerPrescaler = 47999;
 static const unsigned TimerPeriod = 1999;
 #endif
 
+// Do it via direct register access right now, as Zephyr's timer API doesn't expose trigger
+// functionality.
+// I was going to say that Zephyr doesn't support SPI slave functionality, but it does seem
+// like it's been added since I last looked?
+//   We can probably use Zephyr to configure and power up the timers, and then we get in there
+// with direct register access and apply our modifications to enable triggers.  That way, we
+// claim the resources the Zephyr way, and only write the custom code that hooks up the triggers
+// and enables things the way we need.
+
+static void EnableTimersOnAPB()
+{
+    const uint32_t apb1Mask =
+        RCC_APB1ENR_TIM2EN | RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN | RCC_APB1ENR_TIM5EN | RCC_APB1ENR_SPI2EN;
+    const uint32_t apb2Mask = RCC_APB2ENR_TIM1EN | RCC_APB2ENR_SPI1EN;
+
+    uint32_t apb1 = RCC->APB1ENR;
+    LOG_INF("Initial APB1ENR: 0x%08x", apb1);
+    if ((apb1 & apb1Mask) != 0)
+    {
+        LOG_WRN("One of timers 2-5 or spi 2 seem to already be in use by Zephyr?");
+    }
+    apb1 |= apb1Mask;
+    // RCC->APB1ENR = apb1;
+
+    uint32_t apb2 = RCC->APB2ENR;
+    LOG_INF("Initial APB2ENR: 0x%08x", apb2);
+    if ((apb2 & apb2Mask) != 0)
+    {
+        LOG_WRN("Timer 1 or spi 1 already seems to be in use by Zephyr?");
+    }
+    apb2 |= apb2Mask;
+    // RCC->APB2ENR = apb2;
+
+    // LOG_INF("Timers 1-5, spi 1-2 peripherals enabled");
+}
+
 static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, unsigned outputTriggerChannel,
                                 bool enableBothChannels)
 {
-    // TODO: Check power busses
-
     const unsigned CCMR_OCM_PWMMode2 = 7;
     const unsigned TimerHalfPeriod = (TimerPeriod + 1) / 2 - 1;
 
     timerBase->CR1 = 0; // Disable timer
     timerBase->CR2 = outputTriggerChannel << TIM_CR2_MMS_Pos;
+    timerBase->SMCR = 0; // Some bits in SMCR say they should only be changed when SMS == 0
     timerBase->SMCR =
         (inputTrigger
          << TIM_SMCR_TS_Pos); // 5 or 6 << TIM_SMCR_SMS_Pos; // TODO: Change this for gated or trigger mode as needs be
@@ -369,9 +406,52 @@ static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, u
     timerBase->EGR = 0;
 }
 
+const struct pwm_dt_spec jtaghw_pwms[] = {PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 0),
+                                          PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 1),
+                                          PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 2)};
+
 int main(void)
 {
     // This bit tests the timers
+
+    EnableTimersOnAPB();
+
+    if (!device_is_ready(jtaghw_pwms[0].dev))
+    {
+        LOG_ERR("PWM0 device not ready");
+        return 0;
+    }
+    if (!device_is_ready(jtaghw_pwms[1].dev))
+    {
+        LOG_ERR("PWM1 device not ready");
+        return 0;
+    }
+    if (!device_is_ready(jtaghw_pwms[2].dev))
+    {
+        LOG_ERR("PWM2 device not ready");
+        return 0;
+    }
+    EnableTimersOnAPB();
+
+    for (int i = 0; i < 3; ++i)
+    {
+        int result = pwm_set_dt(&jtaghw_pwms[i], 1000000, 500000);
+
+        LOG_INF("PWM%d: Result %d", i, result);
+    }
+
+    /*
+        ConfigurePulseTimer(TIM3, 0, 0, true);
+        ConfigurePulseTimer(TIM4, 0, 0, false);
+
+        TIM3->CR1 = TIM_CR1_CEN;
+        TIM4->CR1 = TIM_CR1_CEN;
+    */
+
+    while (true)
+    {
+        k_sleep(K_SECONDS(100));
+    }
 
     return 0;
 }

@@ -25,3 +25,39 @@
         compatible = "zephyr,cdc-acm-uart";
     };
 };
+
+// Used for the hardware driven JTAG signals
+
+&timers3 {
+    status = "okay";
+
+    pwm3: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch4_pb1>;
+        pinctrl-names = "default";
+    };
+
+};
+
+&timers4 {
+    status = "okay";
+
+    pwm4: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim4_ch1_pb6>;
+        pinctrl-names = "default";
+    };
+};
+
+/ {
+    rjtaghw {
+        compatible = "pwm-leds";
+        status = "okay";
+
+        rjtagpwm: rjtagpwm {
+            pwms = <&pwm3 1 1000 PWM_POLARITY_NORMAL>,
+                   <&pwm3 4 1000 PWM_POLARITY_NORMAL>,
+                   <&pwm4 1 1000 PWM_POLARITY_NORMAL>;
+        };
+    };
+};
