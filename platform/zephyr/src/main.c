@@ -26,6 +26,8 @@
 #include "platform_impl.h"
 #include "serial_queue.h"
 
+#include <stm32_ll_tim.h>
+
 #include <rjcore/rjcore.h>
 
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
@@ -414,8 +416,6 @@ int main(void)
 {
     // This bit tests the timers
 
-    EnableTimersOnAPB();
-
     if (!device_is_ready(jtaghw_pwms[0].dev))
     {
         LOG_ERR("PWM0 device not ready");
@@ -431,14 +431,28 @@ int main(void)
         LOG_ERR("PWM2 device not ready");
         return 0;
     }
-    EnableTimersOnAPB();
+
+    LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
+    LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
+    // LL_TIM_SetTriggerInput(TIM3, LL_TIM_TS_ITR1);
+    // LL_TIM_SetSlaveMode(TIM3, LL_TIM_SLAVEMODE_GATED);
+
+    LL_TIM_SetTriggerOutput(TIM3, LL_TIM_TRGO_OC1REF);
+
+    LL_TIM_SetTriggerInput(TIM4, LL_TIM_TS_ITR2);
+    LL_TIM_SetSlaveMode(TIM4, LL_TIM_SLAVEMODE_GATED);
+    LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
+    LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
 
     for (int i = 0; i < 3; ++i)
     {
-        int result = pwm_set_dt(&jtaghw_pwms[i], 1000000, 500000);
+        int result = pwm_set_dt(&jtaghw_pwms[i], 1000000000, 500000000);
 
         LOG_INF("PWM%d: Result %d", i, result);
     }
+
+    LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
+    LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
 
     /*
         ConfigurePulseTimer(TIM3, 0, 0, true);
@@ -450,7 +464,9 @@ int main(void)
 
     while (true)
     {
-        k_sleep(K_SECONDS(100));
+        k_msleep(100);
+
+        LOG_INF("PWM Pins on Port A: %08x B: %08x", GPIOA->IDR & (1 << 6), GPIOB->IDR & ((1 << 6) | (1 << 1)));
     }
 
     return 0;
