@@ -408,12 +408,15 @@ static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, u
     timerBase->EGR = 0;
 }
 
-const struct pwm_dt_spec jtaghw_pwms[] = {PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 0),
-                                          PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 1),
-                                          PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 2)};
+const struct pwm_dt_spec jtaghw_pwms[] = {
+    PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 0), PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 1),
+    PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 2), PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 3),
+    PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 4)};
 
 int main(void)
 {
+    // usb_enable(NULL);
+
     // This bit tests the timers
 
     if (!device_is_ready(jtaghw_pwms[0].dev))
@@ -432,21 +435,45 @@ int main(void)
         return 0;
     }
 
-    LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
-    LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
-    // LL_TIM_SetTriggerInput(TIM3, LL_TIM_TS_ITR1);
-    // LL_TIM_SetSlaveMode(TIM3, LL_TIM_SLAVEMODE_GATED);
+    /*
+    ```
+              +-> TIMER5 --> TIMER3 -> SCK
+              |   ITR0       ITR2
+    TIMER2 ---+
+              |
+              +-> TIMER1 --> TIMER4 -> TCK
+                  ITR1       ITR0
+    ```
+    */
 
-    LL_TIM_SetTriggerOutput(TIM3, LL_TIM_TRGO_OC1REF);
-
-    LL_TIM_SetTriggerInput(TIM4, LL_TIM_TS_ITR2);
+    LL_TIM_SetTriggerInput(TIM3, LL_TIM_TS_ITR2);
+    LL_TIM_SetSlaveMode(TIM3, LL_TIM_SLAVEMODE_GATED);
+    LL_TIM_SetTriggerInput(TIM4, LL_TIM_TS_ITR0);
     LL_TIM_SetSlaveMode(TIM4, LL_TIM_SLAVEMODE_GATED);
+
+    const uint32_t ExternalClockMode1 = TIM_SMCR_SMS_2 | TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
+
+    LL_TIM_SetTriggerInput(TIM1, LL_TIM_TS_ITR1);
+    LL_TIM_SetSlaveMode(TIM1, ExternalClockMode1);
+    LL_TIM_SetTriggerInput(TIM5, LL_TIM_TS_ITR0);
+    LL_TIM_SetSlaveMode(TIM5, ExternalClockMode1);
+
+    LL_TIM_SetTriggerOutput(TIM5, LL_TIM_TRGO_OC1REF);
+    LL_TIM_SetTriggerOutput(TIM1, LL_TIM_TRGO_OC1REF);
+    LL_TIM_SetTriggerOutput(TIM2, LL_TIM_TRGO_UPDATE);
+
     LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
     LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
 
-    for (int i = 0; i < 3; ++i)
+    LL_TIM_SetOnePulseMode(TIM1, LL_TIM_ONEPULSEMODE_SINGLE);
+    LL_TIM_SetOnePulseMode(TIM5, LL_TIM_ONEPULSEMODE_SINGLE);
+
+    for (int i = 0; i < 5; ++i)
     {
+        // TODO: Swap to pwm_set_cycles to use clock cycles, not time
         int result = pwm_set_dt(&jtaghw_pwms[i], 1000000000, 500000000);
+
+        k_msleep(100);
 
         LOG_INF("PWM%d: Result %d", i, result);
     }

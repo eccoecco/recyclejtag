@@ -28,6 +28,38 @@
 
 // Used for the hardware driven JTAG signals
 
+&timers1 {
+    status = "okay";
+
+    st,countermode = <0>; // Counter mode up
+
+    // During debug and test, prescale down to very low frequencies
+    st,prescaler = <47999>;
+
+    pwm1: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim1_ch1_pa8>;
+        pinctrl-names = "default";
+    };
+};
+
+
+&timers2 {
+    status = "okay";
+
+    st,countermode = <0>; // Counter mode up
+
+    // During debug and test, prescale down to very low frequencies
+    st,prescaler = <47999>;
+
+    pwm1: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim1_ch1_pa8>;
+        pinctrl-names = "default";
+    };
+};
+
+
 &timers3 {
     status = "okay";
 
@@ -59,15 +91,38 @@
     };
 };
 
+&timers5 {
+    status = "okay";
+
+    st,countermode = <0>; // Counter mode up
+
+    // During debug and test, prescale down to very low frequencies
+    st,prescaler = <47999>;
+
+    pwm5: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim5_ch1_pa0>;
+        pinctrl-names = "default";
+    };
+};
+
 / {
     rjtaghw {
         compatible = "pwm-leds";
         status = "okay";
 
+        // TODO: Split these out into separate pwms (e.g. two for sck, one for tck,
+        // one for sckcounter, one for tckcounter, and the final for sourceclk)
+
+        // The internal clocking are brought out to pins because it's easier to
+        // debug/probe than internal signals
+
         rjtagpwm: rjtagpwm {
-            pwms = <&pwm3 1 1000 PWM_POLARITY_NORMAL>,
+            pwms = <&pwm1 1 1000 PWM_POLARITY_NORMAL>,
+                   <&pwm3 1 1000 PWM_POLARITY_NORMAL>,
                    <&pwm3 4 1000 PWM_POLARITY_NORMAL>,
-                   <&pwm4 1 1000 PWM_POLARITY_NORMAL>;
+                   <&pwm4 1 1000 PWM_POLARITY_NORMAL>,
+                   <&pwm5 1 1000 PWM_POLARITY_NORMAL>;
         };
     };
 };
