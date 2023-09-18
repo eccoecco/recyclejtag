@@ -33,9 +33,6 @@
 
     st,countermode = <0>; // Counter mode up
 
-    // During debug and test, prescale down to very low frequencies
-    st,prescaler = <47999>;
-
     pwm1: pwm {
         status = "okay";
         pinctrl-0 = <&tim1_ch1_pa8>;
@@ -95,9 +92,6 @@
     status = "okay";
 
     st,countermode = <0>; // Counter mode up
-
-    // During debug and test, prescale down to very low frequencies
-    st,prescaler = <47999>;
 
     pwm5: pwm {
         status = "okay";
