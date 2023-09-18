@@ -12,6 +12,11 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 #define SERIAL_QUEUE_ELEMENTS 1024
 #define MESSAGE_QUEUE_ELEMENTS 32
 
@@ -34,3 +39,7 @@ int serial_queue_read(struct serial_queue *queue, void *buffer, size_t length, k
 
 // Writes data to the queue, returning number of bytes written, or < 0 for an error
 int serial_queue_write(struct serial_queue *queue, const void *buffer, size_t length);
+
+#ifdef __cplusplus
+}
+#endif

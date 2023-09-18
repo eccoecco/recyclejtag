@@ -408,10 +408,21 @@ static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, u
     timerBase->EGR = 0;
 }
 
+#define PWM_DT_SPEC_GET_BY_IDX_IGNORE_PROP(node, _, idx) PWM_DT_SPEC_GET_BY_IDX(node, idx)
+
+const struct pwm_dt_spec rjtag_sck[] = {
+    DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsck), pwms, PWM_DT_SPEC_GET_BY_IDX_IGNORE_PROP, (, ))};
+
+const struct pwm_dt_spec rjtag_tck[] = {
+
+};
+
+#if 0
 const struct pwm_dt_spec jtaghw_pwms[] = {
     PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 0), PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 1),
     PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 2), PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 3),
     PWM_DT_SPEC_GET_BY_IDX(DT_NODELABEL(rjtagpwm), 4)};
+#endif
 
 int main(void)
 {

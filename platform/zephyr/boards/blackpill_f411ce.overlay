@@ -52,9 +52,9 @@
     // During debug and test, prescale down to very low frequencies
     st,prescaler = <47999>;
 
-    pwm1: pwm {
+    pwm2: pwm {
         status = "okay";
-        pinctrl-0 = <&tim1_ch1_pa8>;
+        pinctrl-0 = <&tim2_ch1_pa5>;
         pinctrl-names = "default";
     };
 };
@@ -117,12 +117,23 @@
         // The internal clocking are brought out to pins because it's easier to
         // debug/probe than internal signals
 
-        rjtagpwm: rjtagpwm {
-            pwms = <&pwm1 1 1000 PWM_POLARITY_NORMAL>,
-                   <&pwm3 1 1000 PWM_POLARITY_NORMAL>,
-                   <&pwm3 4 1000 PWM_POLARITY_NORMAL>,
-                   <&pwm4 1 1000 PWM_POLARITY_NORMAL>,
-                   <&pwm5 1 1000 PWM_POLARITY_NORMAL>;
+        rjtagsck: rjtagsck {
+            pwms = <&pwm3 1 1000 PWM_POLARITY_NORMAL>,
+                   <&pwm3 4 1000 PWM_POLARITY_NORMAL>;
+        };
+        rjtagsckcounter: rjtagsckcounter{
+            pwms = <&pwm5 1 1000 PWM_POLARITY_NORMAL>;
+        };
+
+        rjtagtck: rjtagtck {
+            pwms = <&pwm4 1 1000 PWM_POLARITY_NORMAL>;
+        };
+        rjtagtckcounter: rjtagtckcounter {
+            pwms = <&pwm1 1 1000 PWM_POLARITY_NORMAL>;
+        };
+
+        rjtagsource: rjtagsource {
+            pwms = <&pwm2 1 1000 PWM_POLARITY_NORMAL>;
         };
     };
 };
