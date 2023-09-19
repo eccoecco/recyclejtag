@@ -26,7 +26,6 @@
 #include "platform_impl.h"
 #include "serial_queue.h"
 
-#include <array>
 #include <stm32_ll_tim.h>
 
 #include <rjcore/rjcore.h>
@@ -440,7 +439,7 @@ const PwmDetails Source[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsource),
 } // namespace Pwms
 
 // Timer addresses in order
-const std::array TimerAddresses = {DT_REG_ADDR(DT_NODELABEL(timers1)), DT_REG_ADDR(DT_NODELABEL(timers2)),
+const uint32_t TimerAddresses[] = {DT_REG_ADDR(DT_NODELABEL(timers1)), DT_REG_ADDR(DT_NODELABEL(timers2)),
                                    DT_REG_ADDR(DT_NODELABEL(timers3)), DT_REG_ADDR(DT_NODELABEL(timers4)),
                                    DT_REG_ADDR(DT_NODELABEL(timers5))};
 
@@ -474,9 +473,11 @@ inline int FindTimerOffsetByAddress(TIM_TypeDef *timerAddress)
 // either a valid ITR mask or UINT32_MAX if no connection can be established to it
 inline uint32_t FindItrByTimerOffset(int destinationTimerOffset, int sourceTimerOffset)
 {
-    __ASSERT((destinationTimerOffset >= 0) && (destinationTimerOffset < TimerAddresses.size()),
+    constexpr auto MaximumTimerOffset = ARRAY_SIZE(TimerAddresses);
+
+    __ASSERT((destinationTimerOffset >= 0) && (destinationTimerOffset < MaximumTimerOffset),
              "Invalid destination timer offset");
-    __ASSERT((sourceTimerOffset >= 0) && (sourceTimerOffset < TimerAddresses.size()), "Invalid source timer offset");
+    __ASSERT((sourceTimerOffset >= 0) && (sourceTimerOffset < MaximumTimerOffset), "Invalid source timer offset");
 
     switch (destinationTimerOffset)
     {
@@ -637,9 +638,11 @@ int main(void)
             switch (pwmRole)
             {
             case Hardware::PwmRole::OutputPin:
+                selectInputTrigger(timerAddress, pwmTarget, pwmRole);
                 LL_TIM_SetSlaveMode(timerAddress, LL_TIM_SLAVEMODE_GATED);
                 break;
             case Hardware::PwmRole::Counter:
+                selectInputTrigger(timerAddress, pwmTarget, pwmRole);
                 if ((timerAddress->CR2 & TIM_CR2_MMS_Msk) == 0)
                 {
                     __ASSERT((pwmDetails.DtSpec.channel >= 1) && (pwmDetails.DtSpec.channel <= 4),
