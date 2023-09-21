@@ -586,6 +586,83 @@ inline void ForEachPwm(auto callback)
     }
 }
 
+void ConfigurePWM(const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pwmTarget, Hardware::PwmRole pwmRole)
+{
+    __ASSERT(device_is_ready(pwmDetails.DtSpec.dev), "Timer device not ready");
+
+    constexpr uint32_t ExternalClockMode1 = TIM_SMCR_SMS_2 | TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
+    auto timerAddress = reinterpret_cast<TIM_TypeDef *>(pwmDetails.TimerAddress);
+
+    auto selectInputTrigger = [](TIM_TypeDef *destination, Hardware::PwmTarget pwmTarget, Hardware::PwmRole pwmRole) {
+        if ((destination->SMCR & TIM_SMCR_SMS) != 0)
+        {
+            // Already set up - ignore
+            return;
+        }
+
+        const auto sourceAddress =
+            (pwmRole == Hardware::PwmRole::Counter) ? Hardware::Pwms::Source->TimerAddress
+            : ((pwmTarget == Hardware::PwmTarget::Sck) && (pwmRole == Hardware::PwmRole::OutputPin))
+                ? Hardware::Pwms::SckCounter->TimerAddress
+            : ((pwmTarget == Hardware::PwmTarget::Tck) && (pwmRole == Hardware::PwmRole::OutputPin))
+                ? Hardware::Pwms::TckCounter->TimerAddress
+                : 0;
+
+        __ASSERT(sourceAddress != 0, "Unknown role/target to assign input trigger");
+        auto source = reinterpret_cast<TIM_TypeDef *>(sourceAddress);
+
+        const int destinationTimerOffset = Hardware::FindTimerOffsetByAddress(destination);
+        const int sourceTimerOffset = Hardware::FindTimerOffsetByAddress(source);
+
+        __ASSERT(destinationTimerOffset != -1, "Invalid destination timer address 0x%08x", destination);
+        __ASSERT(sourceTimerOffset != -1, "Invalid source timer address 0x%08x", source);
+
+        const uint32_t itr = Hardware::FindItrByTimerOffset(destinationTimerOffset, sourceTimerOffset);
+
+        __ASSERT(itr != UINT32_MAX, "Unknown connection from TIMER%d to TIMER%d", sourceTimerOffset + 1,
+                 destinationTimerOffset + 1);
+
+        if (itr != UINT32_MAX)
+        {
+            LOG_INF("Connecting TIMER%d --> TRGO --> ITR%d --> TIMER%d", sourceTimerOffset + 1, itr >> TIM_SMCR_TS_Pos,
+                    destinationTimerOffset + 1);
+            LL_TIM_SetTriggerInput(destination, itr);
+        }
+    };
+
+    switch (pwmRole)
+    {
+    case Hardware::PwmRole::OutputPin:
+        selectInputTrigger(timerAddress, pwmTarget, pwmRole);
+        LL_TIM_SetSlaveMode(timerAddress, LL_TIM_SLAVEMODE_GATED);
+        break;
+    case Hardware::PwmRole::Counter:
+        selectInputTrigger(timerAddress, pwmTarget, pwmRole);
+        if ((timerAddress->CR2 & TIM_CR2_MMS_Msk) == 0)
+        {
+            __ASSERT((pwmDetails.DtSpec.channel >= 1) && (pwmDetails.DtSpec.channel <= 4),
+                     "Pwm channel must be between 1 and 4, but was %d", pwmDetails.DtSpec.channel);
+
+            const uint32_t trgo = (pwmDetails.DtSpec.channel == 1)   ? LL_TIM_TRGO_OC1REF
+                                  : (pwmDetails.DtSpec.channel == 2) ? LL_TIM_TRGO_OC2REF
+                                  : (pwmDetails.DtSpec.channel == 3) ? LL_TIM_TRGO_OC3REF
+                                  : (pwmDetails.DtSpec.channel == 4) ? LL_TIM_TRGO_OC4REF
+                                                                     : 0;
+
+            LL_TIM_SetTriggerOutput(timerAddress, trgo);
+        }
+        // All counters get their clocks from the source clock
+        LL_TIM_SetSlaveMode(timerAddress, ExternalClockMode1);
+        // One pulse mode (will have to set every call)
+        LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
+
+        break;
+    case Hardware::PwmRole::Source:
+        LL_TIM_SetTriggerOutput(timerAddress, LL_TIM_TRGO_UPDATE);
+        break;
+    }
+}
+
 } // namespace Hardware
 
 int main(void)
@@ -593,82 +670,7 @@ int main(void)
     LOG_INF("Initialising...");
     // usb_enable(NULL);
 
-    Hardware::ForEachPwm([](const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget, Hardware::PwmRole) {
-        __ASSERT(device_is_ready(pwmDetails.DtSpec.dev), "Timer device not ready");
-    });
-
-    Hardware::ForEachPwm(
-        [](const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pwmTarget, Hardware::PwmRole pwmRole) {
-            constexpr uint32_t ExternalClockMode1 = TIM_SMCR_SMS_2 | TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
-            auto timerAddress = reinterpret_cast<TIM_TypeDef *>(pwmDetails.TimerAddress);
-
-            auto selectInputTrigger = [](TIM_TypeDef *destination, Hardware::PwmTarget pwmTarget,
-                                         Hardware::PwmRole pwmRole) {
-                if ((destination->SMCR & TIM_SMCR_SMS) != 0)
-                {
-                    // Already set up - ignore
-                    return;
-                }
-
-                const auto sourceAddress =
-                    (pwmRole == Hardware::PwmRole::Counter) ? Hardware::Pwms::Source->TimerAddress
-                    : ((pwmTarget == Hardware::PwmTarget::Sck) && (pwmRole == Hardware::PwmRole::OutputPin))
-                        ? Hardware::Pwms::SckCounter->TimerAddress
-                    : ((pwmTarget == Hardware::PwmTarget::Tck) && (pwmRole == Hardware::PwmRole::OutputPin))
-                        ? Hardware::Pwms::TckCounter->TimerAddress
-                        : 0;
-
-                __ASSERT(sourceAddress != 0, "Unknown role/target to assign input trigger");
-                auto source = reinterpret_cast<TIM_TypeDef *>(sourceAddress);
-
-                const int destinationTimerOffset = Hardware::FindTimerOffsetByAddress(destination);
-                const int sourceTimerOffset = Hardware::FindTimerOffsetByAddress(source);
-
-                __ASSERT(destinationTimerOffset != -1, "Invalid destination timer address 0x%08x", destination);
-                __ASSERT(sourceTimerOffset != -1, "Invalid source timer address 0x%08x", source);
-
-                const uint32_t itr = Hardware::FindItrByTimerOffset(destinationTimerOffset, sourceTimerOffset);
-
-                __ASSERT(itr != UINT32_MAX, "Unknown connection from TIMER%d to TIMER%d", sourceTimerOffset + 1,
-                         destinationTimerOffset + 1);
-
-                LL_TIM_SetTriggerInput(destination, itr);
-            };
-
-            switch (pwmRole)
-            {
-            case Hardware::PwmRole::OutputPin:
-                selectInputTrigger(timerAddress, pwmTarget, pwmRole);
-                LL_TIM_SetSlaveMode(timerAddress, LL_TIM_SLAVEMODE_GATED);
-                break;
-            case Hardware::PwmRole::Counter:
-                selectInputTrigger(timerAddress, pwmTarget, pwmRole);
-                if ((timerAddress->CR2 & TIM_CR2_MMS_Msk) == 0)
-                {
-                    __ASSERT((pwmDetails.DtSpec.channel >= 1) && (pwmDetails.DtSpec.channel <= 4),
-                             "Pwm channel must be between 1 and 4, but was %d", pwmDetails.DtSpec.channel);
-
-                    const uint32_t trgo = (pwmDetails.DtSpec.channel == 1)   ? LL_TIM_TRGO_OC1REF
-                                          : (pwmDetails.DtSpec.channel == 2) ? LL_TIM_TRGO_OC2REF
-                                          : (pwmDetails.DtSpec.channel == 3) ? LL_TIM_TRGO_OC3REF
-                                          : (pwmDetails.DtSpec.channel == 4) ? LL_TIM_TRGO_OC4REF
-                                                                             : 0;
-
-                    LL_TIM_SetTriggerOutput(timerAddress, trgo);
-                }
-                // All counters get their clocks from the source clock
-                LL_TIM_SetSlaveMode(timerAddress, ExternalClockMode1);
-                // One pulse mode (will have to set every call)
-                LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
-
-                break;
-            case Hardware::PwmRole::Source:
-                LL_TIM_SetTriggerOutput(timerAddress, LL_TIM_TRGO_UPDATE);
-                break;
-            }
-
-            __ASSERT(device_is_ready(pwmDtSpec.dev), "Timer device not ready");
-        });
+    Hardware::ForEachPwm(Hardware::ConfigurePWM);
 
     /*
     ```
