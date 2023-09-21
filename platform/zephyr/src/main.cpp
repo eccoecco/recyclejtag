@@ -586,6 +586,9 @@ inline void ForEachPwm(auto callback)
     }
 }
 
+constexpr unsigned FullClockPeriod_Ticks = 1999;
+constexpr unsigned HalfClockPeriod_Ticks = (FullClockPeriod_Ticks + 1) / 2 - 1;
+
 void ConfigurePWM(const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pwmTarget, Hardware::PwmRole pwmRole)
 {
     __ASSERT(device_is_ready(pwmDetails.DtSpec.dev), "Timer device not ready");
@@ -635,6 +638,10 @@ void ConfigurePWM(const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pw
     case Hardware::PwmRole::OutputPin:
         selectInputTrigger(timerAddress, pwmTarget, pwmRole);
         LL_TIM_SetSlaveMode(timerAddress, LL_TIM_SLAVEMODE_GATED);
+
+        // Should this be inverted?
+        pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel, FullClockPeriod_Ticks, HalfClockPeriod_Ticks,
+                       PWM_POLARITY_NORMAL);
         break;
     case Hardware::PwmRole::Counter:
         selectInputTrigger(timerAddress, pwmTarget, pwmRole);
@@ -661,6 +668,41 @@ void ConfigurePWM(const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pw
         LL_TIM_SetTriggerOutput(timerAddress, LL_TIM_TRGO_UPDATE);
         break;
     }
+}
+
+void SetupTimers(unsigned tckClocks)
+{
+    const unsigned sckClocks = (tckClocks + 7) & ~7u;
+
+    Hardware::ForEachPwm([tckClocks, sckClocks](const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pwmTarget,
+                                                Hardware::PwmRole pwmRole) {
+        auto timerAddress = reinterpret_cast<TIM_TypeDef *>(pwmDetails.TimerAddress);
+
+        switch (pwmRole)
+        {
+        case Hardware::PwmRole::OutputPin:
+            // TODO: Reset timers to 0, instead of reconfiguring everything
+            pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel, FullClockPeriod_Ticks,
+                           HalfClockPeriod_Ticks, PWM_POLARITY_NORMAL);
+            break;
+        case Hardware::PwmRole::Counter: {
+            const auto ticksForTimer = (pwmTarget == Hardware::PwmTarget::Sck) ? sckClocks : tckClocks;
+
+            // Compare output is the trigger output, and so set the final timer value to 1 greater than the
+            // target pulse number so that output compare can be set to 0
+            LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
+            pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel, ticksForTimer, ticksForTimer - 1,
+                           PWM_POLARITY_NORMAL);
+        }
+        break;
+        case Hardware::PwmRole::Source:
+            // Since update event is the trigger output, it doesn't matter what the PWM duty cycle is
+            LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
+            pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel,
+                           (FullClockPeriod_Ticks + 1) * sckClocks - 1, HalfClockPeriod_Ticks, PWM_POLARITY_NORMAL);
+            break;
+        }
+    });
 }
 
 } // namespace Hardware
