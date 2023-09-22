@@ -353,33 +353,6 @@ static const unsigned TimerPeriod = 1999;
 // claim the resources the Zephyr way, and only write the custom code that hooks up the triggers
 // and enables things the way we need.
 
-static void EnableTimersOnAPB()
-{
-    const uint32_t apb1Mask =
-        RCC_APB1ENR_TIM2EN | RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN | RCC_APB1ENR_TIM5EN | RCC_APB1ENR_SPI2EN;
-    const uint32_t apb2Mask = RCC_APB2ENR_TIM1EN | RCC_APB2ENR_SPI1EN;
-
-    uint32_t apb1 = RCC->APB1ENR;
-    LOG_INF("Initial APB1ENR: 0x%08x", apb1);
-    if ((apb1 & apb1Mask) != 0)
-    {
-        LOG_WRN("One of timers 2-5 or spi 2 seem to already be in use by Zephyr?");
-    }
-    apb1 |= apb1Mask;
-    // RCC->APB1ENR = apb1;
-
-    uint32_t apb2 = RCC->APB2ENR;
-    LOG_INF("Initial APB2ENR: 0x%08x", apb2);
-    if ((apb2 & apb2Mask) != 0)
-    {
-        LOG_WRN("Timer 1 or spi 1 already seems to be in use by Zephyr?");
-    }
-    apb2 |= apb2Mask;
-    // RCC->APB2ENR = apb2;
-
-    // LOG_INF("Timers 1-5, spi 1-2 peripherals enabled");
-}
-
 static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, unsigned outputTriggerChannel,
                                 bool enableBothChannels)
 {
@@ -410,153 +383,22 @@ static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, u
 
 namespace Hardware
 {
-
-struct PwmDetails
-{
-    uint32_t TimerAddress;
-    pwm_dt_spec DtSpec;
-};
-
 namespace Pwms
 {
+#define SHIM_PWM_DT_SPEC_GET_BY_IDX(node, _, idx) PWM_DT_SPEC_GET_BY_IDX(node, idx)
 
-#define PWM_DETAILS_GET_BY_IDX(node, _, idx)                                                                           \
-    PwmDetails                                                                                                         \
-    {                                                                                                                  \
-        .TimerAddress = DT_REG_ADDR(DT_PARENT(DT_PWMS_CTLR_BY_IDX(node, idx))),                                        \
-        .DtSpec = PWM_DT_SPEC_GET_BY_IDX(node, idx),                                                                   \
-    }
-// The STM32 PWM controller is a child of the timer, hence we need to go up to the parent to get the proper address
-
-const PwmDetails Sck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsck), pwms, PWM_DETAILS_GET_BY_IDX, (, ))};
-const PwmDetails SckCounter[] = {
-    DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsckcounter), pwms, PWM_DETAILS_GET_BY_IDX, (, ))};
-const PwmDetails Tck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagtck), pwms, PWM_DETAILS_GET_BY_IDX, (, ))};
-const PwmDetails TckCounter[] = {
-    DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagtckcounter), pwms, PWM_DETAILS_GET_BY_IDX, (, ))};
-const PwmDetails Source[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsource), pwms, PWM_DETAILS_GET_BY_IDX, (, ))};
+const pwm_dt_spec Sck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsck), pwms, SHIM_PWM_DT_SPEC_GET_BY_IDX, (, ))};
+const pwm_dt_spec Tck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagtck), pwms, SHIM_PWM_DT_SPEC_GET_BY_IDX, (, ))};
 
 } // namespace Pwms
 
-// Timer addresses in order
-const uint32_t TimerAddresses[] = {DT_REG_ADDR(DT_NODELABEL(timers1)), DT_REG_ADDR(DT_NODELABEL(timers2)),
-                                   DT_REG_ADDR(DT_NODELABEL(timers3)), DT_REG_ADDR(DT_NODELABEL(timers4)),
-                                   DT_REG_ADDR(DT_NODELABEL(timers5))};
-
-static constexpr int Timer1Offset = 0;
-static constexpr int Timer2Offset = 1;
-static constexpr int Timer3Offset = 2;
-static constexpr int Timer4Offset = 3;
-static constexpr int Timer5Offset = 4;
-
-// Timer offset is off by 1 compared to what the timer is called.
-// i.e. timer1 = 0 offset, timer2 = 1 offset, etc
-inline int FindTimerOffsetByAddress(TIM_TypeDef *timerAddress)
-{
-    const auto numericAddress = reinterpret_cast<uint32_t>(timerAddress);
-
-    int index = 0;
-
-    for (auto address : TimerAddresses)
-    {
-        if (address == numericAddress)
-        {
-            return index;
-        }
-        ++index;
-    }
-
-    return -1;
-}
-
-// Given a destination timer offset and which timer is meant to be its source, returns
-// either a valid ITR mask or UINT32_MAX if no connection can be established to it
-inline uint32_t FindItrByTimerOffset(int destinationTimerOffset, int sourceTimerOffset)
-{
-    constexpr auto MaximumTimerOffset = ARRAY_SIZE(TimerAddresses);
-
-    __ASSERT((destinationTimerOffset >= 0) && (destinationTimerOffset < MaximumTimerOffset),
-             "Invalid destination timer offset");
-    __ASSERT((sourceTimerOffset >= 0) && (sourceTimerOffset < MaximumTimerOffset), "Invalid source timer offset");
-
-    switch (destinationTimerOffset)
-    {
-    case Timer1Offset:
-        switch (sourceTimerOffset)
-        {
-        case Timer5Offset:
-            return LL_TIM_TS_ITR0;
-        case Timer2Offset:
-            return LL_TIM_TS_ITR1;
-        case Timer3Offset:
-            return LL_TIM_TS_ITR2;
-        case Timer4Offset:
-            return LL_TIM_TS_ITR3;
-        }
-        return UINT32_MAX;
-    case Timer2Offset:
-        switch (sourceTimerOffset)
-        {
-        case Timer1Offset:
-            return LL_TIM_TS_ITR0;
-        case Timer3Offset:
-            return LL_TIM_TS_ITR2;
-        case Timer4Offset:
-            return LL_TIM_TS_ITR3;
-        }
-        return UINT32_MAX;
-    case Timer3Offset:
-        switch (sourceTimerOffset)
-        {
-        case Timer1Offset:
-            return LL_TIM_TS_ITR0;
-        case Timer2Offset:
-            return LL_TIM_TS_ITR1;
-        case Timer5Offset:
-            return LL_TIM_TS_ITR2;
-        case Timer4Offset:
-            return LL_TIM_TS_ITR3;
-        }
-        return UINT32_MAX;
-    case Timer4Offset:
-        switch (sourceTimerOffset)
-        {
-        case Timer1Offset:
-            return LL_TIM_TS_ITR0;
-        case Timer2Offset:
-            return LL_TIM_TS_ITR1;
-        case Timer3Offset:
-            return LL_TIM_TS_ITR2;
-        }
-        return UINT32_MAX;
-    case Timer5Offset:
-        switch (sourceTimerOffset)
-        {
-        case Timer2Offset:
-            return LL_TIM_TS_ITR0;
-        case Timer3Offset:
-            return LL_TIM_TS_ITR1;
-        case Timer4Offset:
-            return LL_TIM_TS_ITR2;
-        }
-        return UINT32_MAX;
-    }
-
-    return UINT32_MAX;
-}
-
-enum class PwmRole
-{
-    OutputPin, //!< Used to drive output PWMs
-    Counter,   //!< Used to count how many pulses have been generated
-    Source,    //!< The source sync of the entire timer tree
-};
+constexpr uint32_t TimerBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtimer));
+const auto TimerAddress = reinterpret_cast<TIM_TypeDef *>(TimerBaseAddress);
 
 enum class PwmTarget
 {
-    Tck,  //!< This timer is for generating TCK
-    Sck,  //!< This timer is for generating SCK
-    Both, //!< Only applicable to Source
+    Tck, //!< This timer is for generating TCK
+    Sck, //!< This timer is for generating SCK
 };
 
 inline void ForEachPwm(auto callback)
@@ -566,143 +408,55 @@ inline void ForEachPwm(auto callback)
     // are configured
     for (const auto &pwm : Pwms::Sck)
     {
-        callback(pwm, PwmTarget::Sck, PwmRole::OutputPin);
-    }
-    for (const auto &pwm : Pwms::SckCounter)
-    {
-        callback(pwm, PwmTarget::Sck, PwmRole::Counter);
+        callback(pwm, PwmTarget::Sck);
     }
     for (const auto &pwm : Pwms::Tck)
     {
-        callback(pwm, PwmTarget::Tck, PwmRole::OutputPin);
-    }
-    for (const auto &pwm : Pwms::TckCounter)
-    {
-        callback(pwm, PwmTarget::Tck, PwmRole::Counter);
-    }
-    for (const auto &pwm : Pwms::Source)
-    {
-        callback(pwm, PwmTarget::Both, PwmRole::Source);
+        callback(pwm, PwmTarget::Tck);
     }
 }
 
-constexpr unsigned FullClockPeriod_Ticks = 1999;
-constexpr unsigned HalfClockPeriod_Ticks = (FullClockPeriod_Ticks + 1) / 2 - 1;
+constexpr unsigned FullClockPeriod_Ticks = 2000;
+constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
-void ConfigurePWM(const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pwmTarget, Hardware::PwmRole pwmRole)
+void EnablePWM(const pwm_dt_spec &pwmDeviceTree)
 {
-    __ASSERT(device_is_ready(pwmDetails.DtSpec.dev), "Timer device not ready");
-
-    constexpr uint32_t ExternalClockMode1 = TIM_SMCR_SMS_2 | TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
-    auto timerAddress = reinterpret_cast<TIM_TypeDef *>(pwmDetails.TimerAddress);
-
-    auto selectInputTrigger = [](TIM_TypeDef *destination, Hardware::PwmTarget pwmTarget, Hardware::PwmRole pwmRole) {
-        if ((destination->SMCR & TIM_SMCR_SMS) != 0)
-        {
-            // Already set up - ignore
-            return;
-        }
-
-        const auto sourceAddress =
-            (pwmRole == Hardware::PwmRole::Counter) ? Hardware::Pwms::Source->TimerAddress
-            : ((pwmTarget == Hardware::PwmTarget::Sck) && (pwmRole == Hardware::PwmRole::OutputPin))
-                ? Hardware::Pwms::SckCounter->TimerAddress
-            : ((pwmTarget == Hardware::PwmTarget::Tck) && (pwmRole == Hardware::PwmRole::OutputPin))
-                ? Hardware::Pwms::TckCounter->TimerAddress
-                : 0;
-
-        __ASSERT(sourceAddress != 0, "Unknown role/target to assign input trigger");
-        auto source = reinterpret_cast<TIM_TypeDef *>(sourceAddress);
-
-        const int destinationTimerOffset = Hardware::FindTimerOffsetByAddress(destination);
-        const int sourceTimerOffset = Hardware::FindTimerOffsetByAddress(source);
-
-        __ASSERT(destinationTimerOffset != -1, "Invalid destination timer address 0x%08x", destination);
-        __ASSERT(sourceTimerOffset != -1, "Invalid source timer address 0x%08x", source);
-
-        const uint32_t itr = Hardware::FindItrByTimerOffset(destinationTimerOffset, sourceTimerOffset);
-
-        __ASSERT(itr != UINT32_MAX, "Unknown connection from TIMER%d to TIMER%d", sourceTimerOffset + 1,
-                 destinationTimerOffset + 1);
-
-        if (itr != UINT32_MAX)
-        {
-            LOG_INF("Connecting TIMER%d --> TRGO --> ITR%d --> TIMER%d", sourceTimerOffset + 1, itr >> TIM_SMCR_TS_Pos,
-                    destinationTimerOffset + 1);
-            LL_TIM_SetTriggerInput(destination, itr);
-        }
-    };
-
-    switch (pwmRole)
-    {
-    case Hardware::PwmRole::OutputPin:
-        selectInputTrigger(timerAddress, pwmTarget, pwmRole);
-        LL_TIM_SetSlaveMode(timerAddress, LL_TIM_SLAVEMODE_GATED);
-
-        // Should this be inverted?
-        pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel, FullClockPeriod_Ticks, HalfClockPeriod_Ticks,
-                       PWM_POLARITY_NORMAL);
-        break;
-    case Hardware::PwmRole::Counter:
-        selectInputTrigger(timerAddress, pwmTarget, pwmRole);
-        if ((timerAddress->CR2 & TIM_CR2_MMS_Msk) == 0)
-        {
-            __ASSERT((pwmDetails.DtSpec.channel >= 1) && (pwmDetails.DtSpec.channel <= 4),
-                     "Pwm channel must be between 1 and 4, but was %d", pwmDetails.DtSpec.channel);
-
-            const uint32_t trgo = (pwmDetails.DtSpec.channel == 1)   ? LL_TIM_TRGO_OC1REF
-                                  : (pwmDetails.DtSpec.channel == 2) ? LL_TIM_TRGO_OC2REF
-                                  : (pwmDetails.DtSpec.channel == 3) ? LL_TIM_TRGO_OC3REF
-                                  : (pwmDetails.DtSpec.channel == 4) ? LL_TIM_TRGO_OC4REF
-                                                                     : 0;
-
-            LL_TIM_SetTriggerOutput(timerAddress, trgo);
-        }
-        // All counters get their clocks from the source clock
-        LL_TIM_SetSlaveMode(timerAddress, ExternalClockMode1);
-        // One pulse mode (will have to set every call)
-        LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
-
-        break;
-    case Hardware::PwmRole::Source:
-        LL_TIM_SetTriggerOutput(timerAddress, LL_TIM_TRGO_UPDATE);
-        break;
-    }
+    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, FullClockPeriod_Ticks, HalfClockPeriod_Ticks,
+                   PWM_POLARITY_NORMAL);
 }
 
-void SetupTimers(unsigned tckClocks)
+void DisablePWM(const pwm_dt_spec &pwmDeviceTree)
 {
-    const unsigned sckClocks = (tckClocks + 7) & ~7u;
+    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, 0, 0, PWM_POLARITY_NORMAL);
+}
 
-    Hardware::ForEachPwm([tckClocks, sckClocks](const Hardware::PwmDetails &pwmDetails, Hardware::PwmTarget pwmTarget,
-                                                Hardware::PwmRole pwmRole) {
-        auto timerAddress = reinterpret_cast<TIM_TypeDef *>(pwmDetails.TimerAddress);
+void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
+{
+    (void)pwmTarget;
+    EnablePWM(pwmDeviceTree);
+}
 
-        switch (pwmRole)
+void SetupTimers(unsigned clockPulses, bool bothOutputs)
+{
+    __ASSERT(clockPulses <= 256, "Clock pulses must be an 8-bit number, but got %d", clockPulses);
+    __ASSERT(clockPulses > 0, "Clock pulses cannot be 0");
+
+    for (const auto &tckPwm : Pwms::Tck)
+    {
+        if (bothOutputs)
         {
-        case Hardware::PwmRole::OutputPin:
-            // TODO: Reset timers to 0, instead of reconfiguring everything
-            pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel, FullClockPeriod_Ticks,
-                           HalfClockPeriod_Ticks, PWM_POLARITY_NORMAL);
-            break;
-        case Hardware::PwmRole::Counter: {
-            const auto ticksForTimer = (pwmTarget == Hardware::PwmTarget::Sck) ? sckClocks : tckClocks;
+            EnablePWM(tckPwm);
+        }
+        else
+        {
+            DisablePWM(tckPwm);
+        }
+    }
 
-            // Compare output is the trigger output, and so set the final timer value to 1 greater than the
-            // target pulse number so that output compare can be set to 0
-            LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
-            pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel, ticksForTimer, ticksForTimer - 1,
-                           PWM_POLARITY_NORMAL);
-        }
-        break;
-        case Hardware::PwmRole::Source:
-            // Since update event is the trigger output, it doesn't matter what the PWM duty cycle is
-            LL_TIM_SetOnePulseMode(timerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
-            pwm_set_cycles(pwmDetails.DtSpec.dev, pwmDetails.DtSpec.channel,
-                           (FullClockPeriod_Ticks + 1) * sckClocks - 1, HalfClockPeriod_Ticks, PWM_POLARITY_NORMAL);
-            break;
-        }
-    });
+    LL_TIM_SetRepetitionCounter(TimerAddress, clockPulses - 1);
+    LL_TIM_SetOnePulseMode(TimerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
+    LL_TIM_GenerateEvent_UPDATE(TimerAddress);
+    LL_TIM_EnableCounter(TimerAddress);
 }
 
 } // namespace Hardware
@@ -712,69 +466,45 @@ int main(void)
     LOG_INF("Initialising...");
     // usb_enable(NULL);
 
+    // STM32 PWM driver starts the counter to be free running on init
+    LL_TIM_DisableCounter(Hardware::TimerAddress);
+
     Hardware::ForEachPwm(Hardware::ConfigurePWM);
 
-    /*
-    ```
-              +-> TIMER5 --> TIMER3 -> SCK
-              |   ITR0       ITR2
-    TIMER2 ---+
-              |
-              +-> TIMER1 --> TIMER4 -> TCK
-                  ITR1       ITR0
-    ```
-    */
+    Hardware::SetupTimers(4, true);
 
-#if 0
-    LL_TIM_SetTriggerInput(TIM3, LL_TIM_TS_ITR2);
-    LL_TIM_SetSlaveMode(TIM3, LL_TIM_SLAVEMODE_GATED);
-    LL_TIM_SetTriggerInput(TIM4, LL_TIM_TS_ITR0);
-    LL_TIM_SetSlaveMode(TIM4, LL_TIM_SLAVEMODE_GATED);
+    LOG_INF("Timer 1 dump");
+    LOG_INF("CR1:   %08x", Hardware::TimerAddress->CR1);
+    LOG_INF("CR2:   %08x", Hardware::TimerAddress->CR2);
+    LOG_INF("SMCR:  %08x", Hardware::TimerAddress->SMCR);
+    LOG_INF("DIER:  %08x", Hardware::TimerAddress->DIER);
+    LOG_INF("CCMR1: %08x", Hardware::TimerAddress->CCMR1);
+    LOG_INF("CCMR2: %08x", Hardware::TimerAddress->CCMR2);
+    LOG_INF("CCER:  %08x", Hardware::TimerAddress->CCER);
+    LOG_INF("CCR1:  %08x", Hardware::TimerAddress->CCR1);
+    LOG_INF("CCR2:  %08x", Hardware::TimerAddress->CCR2);
+    LOG_INF("CCR3:  %08x", Hardware::TimerAddress->CCR3);
+    LOG_INF("CCR4:  %08x", Hardware::TimerAddress->CCR4);
+    LOG_INF("PSC:   %08x", Hardware::TimerAddress->PSC);
+    LOG_INF("ARR:   %08x", Hardware::TimerAddress->ARR);
 
-    const uint32_t ExternalClockMode1 = TIM_SMCR_SMS_2 | TIM_SMCR_SMS_1 | TIM_SMCR_SMS_0;
+    LOG_INF("TCK SCK");
 
-    LL_TIM_SetTriggerInput(TIM1, LL_TIM_TS_ITR1);
-    LL_TIM_SetSlaveMode(TIM1, ExternalClockMode1);
-    LL_TIM_SetTriggerInput(TIM5, LL_TIM_TS_ITR0);
-    LL_TIM_SetSlaveMode(TIM5, ExternalClockMode1);
-
-    LL_TIM_SetTriggerOutput(TIM5, LL_TIM_TRGO_OC1REF);
-    LL_TIM_SetTriggerOutput(TIM1, LL_TIM_TRGO_OC1REF);
-    LL_TIM_SetTriggerOutput(TIM2, LL_TIM_TRGO_UPDATE);
-
-    LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
-    LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
-
-    LL_TIM_SetOnePulseMode(TIM1, LL_TIM_ONEPULSEMODE_SINGLE);
-    LL_TIM_SetOnePulseMode(TIM5, LL_TIM_ONEPULSEMODE_SINGLE);
-
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 100; ++i)
     {
-        // TODO: Swap to pwm_set_cycles to use clock cycles, not time
-        int result = pwm_set_dt(&jtaghw_pwms[i], 1000000000, 500000000);
-
         k_msleep(100);
+        const uint32_t idr = GPIOB->IDR;
+        bool tck = idr & (1 << 13);
+        bool sck0 = idr & (1 << 0);
+        bool sck1 = idr & (1 << 1);
 
-        LOG_INF("PWM%d: Result %d", i, result);
+        // LOG_INF("%d   %d %d   - %d", tck, sck0, sck1, Hardware::TimerAddress->CNT);
+        LOG_INF("GPIOB: %08x", idr);
     }
-
-    LOG_INF("SMCR: %08x %08x", TIM3->SMCR, TIM4->SMCR);
-    LOG_INF(" CR2: %08x %08x", TIM3->CR2, TIM4->CR2);
-
-    /*
-        ConfigurePulseTimer(TIM3, 0, 0, true);
-        ConfigurePulseTimer(TIM4, 0, 0, false);
-
-        TIM3->CR1 = TIM_CR1_CEN;
-        TIM4->CR1 = TIM_CR1_CEN;
-    */
-#endif
 
     while (true)
     {
-        k_msleep(100);
-
-        LOG_INF("PWM Pins on Port A: %08x B: %08x", GPIOA->IDR & (1 << 6), GPIOB->IDR & ((1 << 6) | (1 << 1)));
+        k_sleep(K_SECONDS(100));
     }
 
     return 0;

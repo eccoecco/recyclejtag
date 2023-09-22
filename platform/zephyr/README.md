@@ -103,11 +103,7 @@ For example, if we only want to send 43 bits of data:
   TCK remains idle.
 
 Since the repetition counter used to make this happen is only 8 bits
-wide (and thus has a maximum of 255 bits), larger transactions can
-only happen in 248 bit chunks (unless I want to spend the extra
-effort to allow part clocks during normal transmission, which
-shouldn't be too bad, but just adds extra complexity for not too
-much gain).
+wide, larger transactions can only happen in 256 bit chunks.
 
 The SPI periperhals will need DMA set up for them.  Hopefully we
 won't experience the same data corruption as we did as in the previous
