@@ -381,6 +381,11 @@ static void ConfigurePulseTimer(TIM_TypeDef *timerBase, unsigned inputTrigger, u
     timerBase->EGR = 0;
 }
 
+extern "C"
+{
+void OnPulsesCompleteIsr(void *arg); // Forward declare for setup
+}
+
 namespace Hardware
 {
 namespace Pwms
@@ -436,7 +441,29 @@ void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarge
     EnablePWM(pwmDeviceTree);
 }
 
-void SetupTimers(unsigned clockPulses, bool bothOutputs)
+#define IMPL_TIMER_UPDATE_IRQ DT_IRQ_BY_NAME(DT_ALIAS(rjtagtimer), up, irq)
+#define IMPL_TIMER_UPDATE_PRIORITY DT_IRQ_BY_NAME(DT_ALIAS(rjtagtimer), up, priority)
+
+void InitialiseTimer()
+{
+    // STM32 PWM driver starts the counter to be free running on init
+    LL_TIM_DisableCounter(TimerAddress);
+    LL_TIM_SetUpdateSource(TimerAddress, LL_TIM_UPDATESOURCE_COUNTER);
+    // Reset b ack to 0
+    LL_TIM_SetCounter(TimerAddress, 0);
+    LL_TIM_GenerateEvent_UPDATE(TimerAddress);
+    LL_TIM_ClearFlag_UPDATE(TimerAddress);
+
+    // Connect the interrupt so that Zephyr knows about it
+    IRQ_CONNECT(IMPL_TIMER_UPDATE_IRQ, IMPL_TIMER_UPDATE_PRIORITY, OnPulsesCompleteIsr, nullptr, 0);
+    irq_enable(IMPL_TIMER_UPDATE_IRQ);
+    // Set up the hardware for it
+    LL_TIM_EnableIT_UPDATE(TimerAddress);
+
+    Hardware::ForEachPwm(ConfigurePWM);
+}
+
+void SetupTimer(unsigned clockPulses, bool bothOutputs)
 {
     __ASSERT(clockPulses <= 256, "Clock pulses must be an 8-bit number, but got %d", clockPulses);
     __ASSERT(clockPulses > 0, "Clock pulses cannot be 0");
@@ -461,18 +488,26 @@ void SetupTimers(unsigned clockPulses, bool bothOutputs)
 
 } // namespace Hardware
 
+extern "C"
+{
+void OnPulsesCompleteIsr(void *arg)
+{
+    LL_TIM_ClearFlag_UPDATE(Hardware::TimerAddress);
+
+    LOG_INF("isr");
+}
+}
+
 int main(void)
 {
     LOG_INF("Initialising...");
     // usb_enable(NULL);
 
-    // STM32 PWM driver starts the counter to be free running on init
-    LL_TIM_DisableCounter(Hardware::TimerAddress);
+    Hardware::InitialiseTimer();
 
-    Hardware::ForEachPwm(Hardware::ConfigurePWM);
+    Hardware::SetupTimer(4, true);
 
-    Hardware::SetupTimers(4, true);
-
+#if 0
     LOG_INF("Timer 1 dump");
     LOG_INF("CR1:   %08x", Hardware::TimerAddress->CR1);
     LOG_INF("CR2:   %08x", Hardware::TimerAddress->CR2);
@@ -487,19 +522,20 @@ int main(void)
     LOG_INF("CCR4:  %08x", Hardware::TimerAddress->CCR4);
     LOG_INF("PSC:   %08x", Hardware::TimerAddress->PSC);
     LOG_INF("ARR:   %08x", Hardware::TimerAddress->ARR);
+#endif
 
     LOG_INF("TCK SCK");
 
     for (int i = 0; i < 100; ++i)
     {
-        k_msleep(100);
         const uint32_t idr = GPIOB->IDR;
         bool tck = idr & (1 << 13);
         bool sck0 = idr & (1 << 0);
         bool sck1 = idr & (1 << 1);
 
-        // LOG_INF("%d   %d %d   - %d", tck, sck0, sck1, Hardware::TimerAddress->CNT);
-        LOG_INF("GPIOB: %08x", idr);
+        LOG_INF("%d   %d %d", tck, sck0, sck1);
+
+        k_msleep(100);
     }
 
     while (true)
