@@ -83,46 +83,34 @@ commonly *not* a multiple of 8.  Hence, the trickiness.
 
 Short of bit bashing SCK and TCK and transferring it via DMA
 like the previous solution (which was sort of unreliable...),
-I am going to generate it via cascaded timers.
+I am going to generate it via a timer.
 
-I haven't yet assigned specific timers to the chain yet, but
-the concept is:
+Previously, I was going to cascade timers, but the extra complexity
+isn't really worth it and I might as well just use TIMER1's
+repetition counter (even though it is only 8 bits).
 
-```
-        +-- TIMs1 -> TIMs2 --> SCK
-        |
-TIMa ---+
-        |
-        +-- TIMj1 -> TIMj2 --> TCK
-```
+The concept is that TIMER1 can provide both TCK and SCK, and will
+do so while while there are full bytes left to send.  When an
+odd number of bits are left over, then TIMER1 will clock out only
+the leftover number of bits, and then be reconfigured to only clock
+out the number of bits necessary to make SCK round up to 8 (while
+holding TCK idle), so that the SPI periperhals continue working.
 
-Both SCK and TCK are *synchronised*
+For example, if we only want to send 43 bits of data:
 
-TIMs2 and TIMj2 are configured to have the exact same configuration
-(same prescaler, same counter reset to 0 prior to start, etc) so
-that if they are enabled at the same time, they will generate the
-exact same waveforms via their channel compare outputs.  These are
-configured in gated input mode, so that the TRGO of TIMs1/TIMj1
-will enable/disable the TIMs2/TIMj2 counters.
+* TIMER1 is configured to send 43 rising edges on both TCK and SCK
+* TIMER1 is then reconfigured to send 5 rising edges on SCK, while
+  TCK remains idle.
 
-TIMs1 and TIMj1 are configured in one shot mode, and configured to
-only run as long as necessary for TIMs2/TIMj2 to generate the number
-of pulses required.
+Since the repetition counter used to make this happen is only 8 bits
+wide (and thus has a maximum of 255 bits), larger transactions can
+only happen in 248 bit chunks (unless I want to spend the extra
+effort to allow part clocks during normal transmission, which
+shouldn't be too bad, but just adds extra complexity for not too
+much gain).
 
-For example, if SCK needed 32 pulses, then TIMs1 would be configured
-to run for (32 x SCK period) cycles before stopping (or its TRGO would
-deassert after that many cycles.  However, if TCK only needed 30 pulses,
-then TIMj1 would be configured for (30 x TCK/SCK period) cycles.
-
-TIMs1 and TIMj1 are both run in gated mode, where TIMa is used to
-ensure that TIMs1 and TIMj1 both start at the exact same time, to ensure
-that TIMs2 and TIMj2 both start at the exact same time.
-
-This silly 5 timer and 2 SPI peripheral connection is used to try and
-speed up JTAG transactions.
-
-Obviously, the SPI periperhals will need DMA set up for them.  Hopefully
-we won't experience the same data corruption as we did as in the previous
+The SPI periperhals will need DMA set up for them.  Hopefully we
+won't experience the same data corruption as we did as in the previous
 setup.
 
 #### Provisional Peripheral Choices
@@ -139,33 +127,8 @@ This means using:
 * TMS: SPI1 - MISO1 - PB4 (left hand side)
 * TDI: SPI2 - MISO2 - PB14 (left hand side)
 * TDO: SPI2 - MOSI2 - PB15 (left hand side)
-* TCK: TIMER4 - CH1 - PB6 (left hand side)
+* TCK: TIMER1 - CH1N - PB13 (left hand side)
 * SPI1 - SCK1  - PA5 (right hand side)
-* Source of SCK1: TIMER3 - CH1 - PA6 (right hand side, neighbours PA5 - can use a jumper)
+* Source of SCK1: TIMER1 - CH2N - PB0 (right hand side, three pins up from PA5)
 * SPI2 - SCK2 - PB10 (right hand side)
-* Source of SCK2: TIMER3 - CH4 - PB1 (right hand side, two pins away from PB10 - have to use a wire)
-
-Given the timer's internal connections of ITRn and TRIGO, we thus have:
-
-```
-          +-> TIMER5 --> TIMER3 -> SCK
-          |   ITR0       ITR2
-TIMER2 ---+
-          |
-          +-> TIMER1 --> TIMER4 -> TCK
-              ITR1       ITR0
-```
-
-I'm constrained by pin mapping to use TIMER3 and TIMER4 as the outputs.
-Remember I want to keep TCK on PORTB, and while I technically
-could use PB3, that's hilarious the board's JTDO pin, which I think
-would be hilarious to try and preserve.  I've had to replace JTRST with
-MISO1 (because I can't find another MISO pin on PORTB), but I think that
-JTRST is sometimes optional, so not too fussed.
-
-Timer 3 is the only timer out of Timers 2, 3, and 4 to accept Timer 5
-as its input, and so Timer 5 was placed there due to the constraints.
-However, Timer 5 does *not* accept Timer 1 as its inputs, which meant
-that Timer 1 was linked to Timer 4.  Timer 5 and Timer 1 does both
-accept Timer 2 as its trigger input though, and thus the layout was
-decided.
+* Source of SCK2: TIMER1 - CH3N - PB1 (right hand side, two pins down from PB10)
