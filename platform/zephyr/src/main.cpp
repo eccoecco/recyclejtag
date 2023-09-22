@@ -422,12 +422,12 @@ constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 void EnablePWM(const pwm_dt_spec &pwmDeviceTree)
 {
     pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, FullClockPeriod_Ticks, HalfClockPeriod_Ticks,
-                   PWM_POLARITY_NORMAL);
+                   pwmDeviceTree.flags);
 }
 
 void DisablePWM(const pwm_dt_spec &pwmDeviceTree)
 {
-    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, 0, 0, PWM_POLARITY_NORMAL);
+    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, 0, 0, 0);
 }
 
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)

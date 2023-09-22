@@ -46,12 +46,14 @@
         compatible = "pwm-leds";
         status = "okay";
 
+        // If using an complementary channel (e.g. ch1n, ch2n, ch3n, ch4n...)
+        // then you must add the STM32_PWM_COMPLEMENTARY flag
         rjtagsck: rjtagsck {
-            pwms = <&pwm1 2 1000 PWM_POLARITY_NORMAL>,
-                   <&pwm1 3 1000 PWM_POLARITY_NORMAL>;
+            pwms = <&pwm1 2 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>,
+                   <&pwm1 3 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>;
         };
         rjtagtck: rjtagtck {
-            pwms = <&pwm1 1 1000 PWM_POLARITY_NORMAL>;
+            pwms = <&pwm1 1 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>;
         };
     };
 
