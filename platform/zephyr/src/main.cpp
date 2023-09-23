@@ -424,21 +424,11 @@ inline void ForEachPwm(auto callback)
 constexpr unsigned FullClockPeriod_Ticks = 2000;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
-void EnablePWM(const pwm_dt_spec &pwmDeviceTree)
-{
-    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, FullClockPeriod_Ticks, HalfClockPeriod_Ticks,
-                   pwmDeviceTree.flags);
-}
-
-void DisablePWM(const pwm_dt_spec &pwmDeviceTree)
-{
-    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, 0, 0, 0);
-}
-
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
 {
     (void)pwmTarget;
-    EnablePWM(pwmDeviceTree);
+    pwm_set_cycles(pwmDeviceTree.dev, pwmDeviceTree.channel, FullClockPeriod_Ticks, HalfClockPeriod_Ticks,
+                   pwmDeviceTree.flags);
 }
 
 #define IMPL_TIMER_UPDATE_IRQ DT_IRQ_BY_NAME(DT_ALIAS(rjtagtimer), up, irq)
@@ -463,7 +453,29 @@ void InitialiseTimer()
     Hardware::ForEachPwm(ConfigurePWM);
 }
 
-void SetupTimer(unsigned clockPulses, bool bothOutputs)
+static void UpdateChannel(int channel, unsigned value)
+{
+    switch (channel)
+    {
+    case 1:
+        TimerAddress->CCR1 = value;
+        break;
+    case 2:
+        TimerAddress->CCR2 = value;
+        break;
+    case 3:
+        TimerAddress->CCR3 = value;
+        break;
+    case 4:
+        TimerAddress->CCR4 = value;
+        break;
+    default:
+        __ASSERT(false, "Unknown timer channel %d", channel);
+        break;
+    }
+}
+
+static void SetupTimer(unsigned clockPulses, bool bothOutputs)
 {
     __ASSERT(clockPulses <= 256, "Clock pulses must be an 8-bit number, but got %d", clockPulses);
     __ASSERT(clockPulses > 0, "Clock pulses cannot be 0");
@@ -472,11 +484,13 @@ void SetupTimer(unsigned clockPulses, bool bothOutputs)
     {
         if (bothOutputs)
         {
-            EnablePWM(tckPwm);
+            // Set 50% duty cycle
+            UpdateChannel(tckPwm.channel, HalfClockPeriod_Ticks - 1);
         }
         else
         {
-            DisablePWM(tckPwm);
+            // Keep idle high
+            UpdateChannel(tckPwm.channel, FullClockPeriod_Ticks);
         }
     }
 
