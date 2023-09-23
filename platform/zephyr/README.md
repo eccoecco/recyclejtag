@@ -117,14 +117,18 @@ the board.  Mainly so that I can easily swap it back to bitbashing mode
 (which assumes all pins are on a single port) without much hassle.
 
 The SCK pins are not considered JTAG signals, and I'm going to put the
-SCK + Timer pulses on the right hand side.
+SCK + Timer pulses on the right hand side, if possible.
 
 This means using:
 * TMS: SPI1 - MISO1 - PB4 (left hand side)
 * TDI: SPI2 - MISO2 - PB14 (left hand side)
 * TDO: SPI2 - MOSI2 - PB15 (left hand side)
 * TCK: TIMER1 - CH1N - PB13 (left hand side)
-* SPI1 - SCK1  - PA5 (right hand side)
+* SPI1 - NSS1 - PA4 (right hand side)
+* Source of NSS1: GPIO PA3 (right hand side, jumper straight to PA4)
+* SPI1 - SCK1 - PA5 (right hand side)
 * Source of SCK1: TIMER1 - CH2N - PB0 (right hand side, three pins up from PA5)
+* SPI2 - NSS2 - PB9 (left hand side)
+* Source of NSS2: GPIO PB8 (left hand side, jumper straight to PB9)
 * SPI2 - SCK2 - PB10 (right hand side)
 * Source of SCK2: TIMER1 - CH3N - PB1 (right hand side, two pins down from PB10)
