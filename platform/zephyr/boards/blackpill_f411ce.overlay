@@ -73,5 +73,39 @@
 
     aliases {
         rjtagtimer = &timers1;
+        rjtagtms = &spi1;
+        rjtagtdio = &spi2;
     };
+};
+
+&spi1 {
+    pinctrl-0 = <&spi1_sck_pa5 &spi1_nss_pa4
+    &spi1_miso_pb4 &spi1_mosi_pa7>;
+    pinctrl-names = "default";
+    status = "okay";
+
+    dmas = <&dma2 5 3 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
+           <&dma2 2 3 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
+    dma-names = "tx", "rx";
+};
+
+&spi2 {
+    pinctrl-0 = <&spi2_sck_pb10 &spi2_nss_pb9
+    &spi2_miso_pb14 &spi2_mosi_pb15>;
+    pinctrl-names = "default";
+    status = "okay";
+
+    dmas = <&dma1 4 0 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
+           <&dma1 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
+    dma-names = "tx", "rx";
+};
+
+// SPI2 uses DMA1
+&dma1 {
+    status = "okay";
+};
+
+// SPI1 uses DMA2
+&dma2 {
+    status = "okay";
 };
