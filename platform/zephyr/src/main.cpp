@@ -183,6 +183,18 @@ const pwm_dt_spec Sck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsck), pwms
 const pwm_dt_spec Tck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagtck), pwms, SHIM_PWM_DT_SPEC_GET_BY_IDX, (, ))};
 
 } // namespace Pwms
+namespace State
+{
+
+// Locked with the IRQ is running.  The IRQ will unlock it when done.
+// Use a semaphore since k_sem_give() is isr-ok
+k_sem Lock;
+
+// Should only be written to if lock is acquired (free access from IRQ because
+// IRQ implicitly acquires lock)
+unsigned LeftoverBits = 0;
+
+} // namespace State
 
 constexpr uint32_t TimerBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtimer));
 const auto TimerAddress = reinterpret_cast<TIM_TypeDef *>(TimerBaseAddress);
@@ -223,6 +235,11 @@ void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarge
 
 void InitialiseTimer()
 {
+#pragma message("TODO: Configure and initialise SPI NSS pins here")
+
+    k_sem_init(&State::Lock, 1, 1);
+    State::LeftoverBits = 0;
+
     // STM32 PWM driver starts the counter to be free running on init
     LL_TIM_DisableCounter(TimerAddress);
     LL_TIM_SetUpdateSource(TimerAddress, LL_TIM_UPDATESOURCE_COUNTER);
@@ -262,23 +279,22 @@ static void UpdateChannel(int channel, unsigned value)
     }
 }
 
-static void SetupTimer(unsigned clockPulses, bool bothOutputs)
+static void StartClockingBits(unsigned clockPulses)
 {
     __ASSERT(clockPulses <= 256, "Clock pulses must be an 8-bit number, but got %d", clockPulses);
     __ASSERT(clockPulses > 0, "Clock pulses cannot be 0");
 
+    unsigned leftoverPulses = 8 - (clockPulses & 0x7);
+
+    k_sem_take(&State::Lock, K_FOREVER);
+    State::LeftoverBits = leftoverPulses;
+
+#pragma message("TODO: Assert NSS pins here")
+
     for (const auto &tckPwm : Pwms::Tck)
     {
-        if (bothOutputs)
-        {
-            // Set 50% duty cycle
-            UpdateChannel(tckPwm.channel, HalfClockPeriod_Ticks - 1);
-        }
-        else
-        {
-            // Keep idle high
-            UpdateChannel(tckPwm.channel, FullClockPeriod_Ticks);
-        }
+        // Set 50% duty cycle
+        UpdateChannel(tckPwm.channel, HalfClockPeriod_Ticks - 1);
     }
 
     LL_TIM_SetRepetitionCounter(TimerAddress, clockPulses - 1);
@@ -296,6 +312,29 @@ void OnPulsesCompleteIsr(void *arg)
     LL_TIM_ClearFlag_UPDATE(Hardware::TimerAddress);
 
     LOG_INF("isr");
+
+    if (Hardware::State::LeftoverBits != 0)
+    {
+        unsigned leftoverBits = Hardware::State::LeftoverBits;
+        Hardware::State::LeftoverBits = 0;
+
+        // Set TCK to idle high when doing leftover bits
+        for (const auto &tckPwm : Hardware::Pwms::Tck)
+        {
+            Hardware::UpdateChannel(tckPwm.channel, Hardware::FullClockPeriod_Ticks);
+        }
+
+        LL_TIM_SetRepetitionCounter(Hardware::TimerAddress, leftoverBits - 1);
+        LL_TIM_SetOnePulseMode(Hardware::TimerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
+        LL_TIM_GenerateEvent_UPDATE(Hardware::TimerAddress);
+        LL_TIM_EnableCounter(Hardware::TimerAddress);
+    }
+    else
+    {
+        LOG_INF("end isr");
+#pragma message("TODO: Deassert NSS pins here")
+        k_sem_give(&Hardware::State::Lock);
+    }
 }
 }
 
@@ -306,7 +345,7 @@ int main(void)
 
     Hardware::InitialiseTimer();
 
-    Hardware::SetupTimer(4, true);
+    Hardware::StartClockingBits(7);
 
 #if 0
     LOG_INF("Timer 1 dump");
