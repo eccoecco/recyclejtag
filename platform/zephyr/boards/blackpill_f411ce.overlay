@@ -62,6 +62,15 @@
         };
     };
 
+    rjtagss {
+        compatible = "gpio-keys";
+
+        rjtagnss: rjtagnss  {
+            gpios = <&gpioa 3 GPIO_ACTIVE_LOW>,
+                    <&gpiob 8 GPIO_ACTIVE_LOW>;
+        };
+    };
+
     aliases {
         rjtagtimer = &timers1;
     };

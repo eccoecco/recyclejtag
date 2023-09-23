@@ -183,6 +183,23 @@ const pwm_dt_spec Sck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagsck), pwms
 const pwm_dt_spec Tck[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagtck), pwms, SHIM_PWM_DT_SPEC_GET_BY_IDX, (, ))};
 
 } // namespace Pwms
+namespace Gpios
+{
+struct Details
+{
+    GPIO_TypeDef *PortAddress;
+    gpio_dt_spec DtSpec;
+};
+
+#define GET_GPIO_DETAILS_BY_IDX(node_id, prop, idx)                                                                    \
+    Details                                                                                                            \
+    {                                                                                                                  \
+        .PortAddress = reinterpret_cast<GPIO_TypeDef *>(DT_REG_ADDR(DT_GPIO_CTLR_BY_IDX(node_id, prop, idx))),         \
+        .DtSpec = GPIO_DT_SPEC_GET_BY_IDX(node_id, prop, idx)                                                          \
+    }
+
+const Details Nss[] = {DT_FOREACH_PROP_ELEM_SEP(DT_NODELABEL(rjtagnss), gpios, GET_GPIO_DETAILS_BY_IDX, (, ))};
+} // namespace Gpios
 namespace State
 {
 
@@ -235,7 +252,10 @@ void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarge
 
 void InitialiseTimer()
 {
-#pragma message("TODO: Configure and initialise SPI NSS pins here")
+    for (const auto &nssSpec : Gpios::Nss)
+    {
+        gpio_pin_configure_dt(&nssSpec.DtSpec, GPIO_OUTPUT_INACTIVE);
+    }
 
     k_sem_init(&State::Lock, 1, 1);
     State::LeftoverBits = 0;
@@ -289,7 +309,11 @@ static void StartClockingBits(unsigned clockPulses)
     k_sem_take(&State::Lock, K_FOREVER);
     State::LeftoverBits = leftoverPulses;
 
-#pragma message("TODO: Assert NSS pins here")
+    for (const auto &nssSpec : Gpios::Nss)
+    {
+        nssSpec.PortAddress->BSRR = (1 << nssSpec.DtSpec.pin);
+        // gpio_pin_set_dt(&nssSpec, 1);
+    }
 
     for (const auto &tckPwm : Pwms::Tck)
     {
@@ -332,7 +356,18 @@ void OnPulsesCompleteIsr(void *arg)
     else
     {
         LOG_INF("end isr");
-#pragma message("TODO: Deassert NSS pins here")
+
+        for (const auto &nssSpec : Hardware::Gpios::Nss)
+        {
+            // Is this ISR safe in general?
+            // In the case of the STM32, I think it is, but it may not be guaranteed
+            // in all platforms.
+            // gpio_pin_set_dt(&nssSpec, 0);
+
+            // Direct register access should be safe
+            nssSpec.PortAddress->BSRR = (0x1'0000 << nssSpec.DtSpec.pin);
+        }
+
         k_sem_give(&Hardware::State::Lock);
     }
 }
@@ -364,16 +399,19 @@ int main(void)
     LOG_INF("ARR:   %08x", Hardware::TimerAddress->ARR);
 #endif
 
-    LOG_INF("TCK SCK");
+    LOG_INF("NSS1,2 TCK SCK");
 
     for (int i = 0; i < 100; ++i)
     {
-        const uint32_t idr = GPIOB->IDR;
-        bool tck = idr & (1 << 13);
-        bool sck0 = idr & (1 << 0);
-        bool sck1 = idr & (1 << 1);
+        const uint32_t idra = GPIOA->IDR;
+        const uint32_t idrb = GPIOB->IDR;
+        bool tck = idrb & (1 << 13);
+        bool sck0 = idrb & (1 << 0);
+        bool sck1 = idrb & (1 << 1);
+        bool nss1 = idra & (1 << 3);
+        bool nss2 = idrb & (1 << 8);
 
-        LOG_INF("%d   %d %d", tck, sck0, sck1);
+        LOG_INF("   %d,%d  %d   %d,%d", nss1, nss2, tck, sck0, sck1);
 
         k_msleep(100);
     }
