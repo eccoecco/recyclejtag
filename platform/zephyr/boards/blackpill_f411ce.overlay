@@ -48,10 +48,15 @@
 
         // If using an complementary channel (e.g. ch1n, ch2n, ch3n, ch4n...)
         // then you must add the STM32_PWM_COMPLEMENTARY flag
+        // SCK set up for CPOL=0, CPHA=1 (i.e. clock idle low, change on rising
+        // edge, sample on falling edge)
         rjtagsck: rjtagsck {
-            pwms = <&pwm1 2 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>,
-                   <&pwm1 3 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>;
+            pwms = <&pwm1 2 1000 (PWM_POLARITY_INVERTED | STM32_PWM_COMPLEMENTARY)>,
+                   <&pwm1 3 1000 (PWM_POLARITY_INVERTED | STM32_PWM_COMPLEMENTARY)>;
         };
+
+        // TCK set up for CPOL=1, CPHA=1 (i.e. clock idle high, change on falling
+        // edge, sample on rising edge)
         rjtagtck: rjtagtck {
             pwms = <&pwm1 1 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>;
         };
