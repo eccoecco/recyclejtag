@@ -14,6 +14,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pwm.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/uart/cdc_acm.h>
 #include <zephyr/kernel.h>
@@ -237,7 +238,7 @@ inline void ForEachPwm(auto callback)
     }
 }
 
-constexpr unsigned FullClockPeriod_Ticks = 2000;
+constexpr unsigned FullClockPeriod_Ticks = 1000;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
@@ -311,7 +312,8 @@ static void StartClockingBits(unsigned clockPulses)
 
     for (const auto &nssSpec : Gpios::Nss)
     {
-        nssSpec.PortAddress->BSRR = (1 << nssSpec.DtSpec.pin);
+        // Active low, so clear to be active
+        nssSpec.PortAddress->BSRR = (0x1'0000 << nssSpec.DtSpec.pin);
         // gpio_pin_set_dt(&nssSpec, 1);
     }
 
@@ -325,6 +327,127 @@ static void StartClockingBits(unsigned clockPulses)
     LL_TIM_SetOnePulseMode(TimerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
     LL_TIM_GenerateEvent_UPDATE(TimerAddress);
     LL_TIM_EnableCounter(TimerAddress);
+}
+
+namespace Spi
+{
+
+static const spi_config Config = {
+    .frequency = 1'000'000,
+    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_LSB | SPI_MODE_CPHA | SPI_OP_MODE_SLAVE,
+    .slave = 0,
+};
+
+// TODO: Replace this boolean with a semaphore, similar to how the timer ISR has a semaphore
+// for sync
+static bool TransactionInProgress = false;
+
+static k_poll_signal SignalDone;
+
+} // namespace Spi
+
+void InitialiseSPI()
+{
+    k_poll_signal_init(&Spi::SignalDone);
+    k_poll_signal_reset(&Spi::SignalDone);
+
+    const device *tmsDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtms));
+    if (!device_is_ready(tmsDevice))
+    {
+        LOG_ERR("SPI for TMS is not ready");
+        return;
+    }
+
+    const device *tdioDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtdio));
+    if (!device_is_ready(tdioDevice))
+    {
+        LOG_ERR("SPI for TDI/TDO is not ready");
+        return;
+    }
+}
+
+void WaitUntilSpiDone()
+{
+    if (!Spi::TransactionInProgress)
+    {
+        return;
+    }
+
+#pragma message("Use worker thread that just k_poll(events, 1, K_FOREVER) and releases a sync semaphore once signalled")
+    // Yeah, need a better way.  This busy wait is a bit silly.
+
+    unsigned signalled;
+    int result;
+
+    do
+    {
+        k_msleep(5);
+        k_poll_signal_check(&Spi::SignalDone, &signalled, &result);
+    } while (signalled == 0);
+
+    k_poll_signal_reset(&Spi::SignalDone);
+
+    Spi::TransactionInProgress = false;
+}
+
+void SetupJtagSpi(unsigned totalBits, const uint8_t *tms, const uint8_t *tdi, uint8_t *tdo, uint8_t *discarded)
+{
+    const device *tmsDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtms));
+    const device *tdioDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtdio));
+
+    unsigned bytesToSend = (totalBits + 7) >> 3;
+
+    const spi_buf tmsBuffer = {
+        .buf = const_cast<uint8_t *>(tms),
+        .len = bytesToSend,
+    };
+    const spi_buf_set tmsBuffers = {
+        .buffers = &tmsBuffer,
+        .count = 1,
+    };
+
+    const spi_buf tdiBuffer = {
+        .buf = const_cast<uint8_t *>(tdi),
+        .len = bytesToSend,
+    };
+    const spi_buf_set tdiBuffers = {
+        .buffers = &tdiBuffer,
+        .count = 1,
+    };
+
+    spi_buf tdoBuffer = {
+        .buf = tdo,
+        .len = bytesToSend,
+    };
+    const spi_buf_set tdoBuffers = {
+        .buffers = &tdoBuffer,
+        .count = 1,
+    };
+    spi_buf discardedBuffer = {
+        .buf = discarded,
+        .len = bytesToSend,
+    };
+    const spi_buf_set discardedBuffers = {
+        .buffers = &discardedBuffer,
+        .count = 1,
+    };
+
+    WaitUntilSpiDone();
+
+    int result;
+
+    result = spi_transceive_signal(tmsDevice, &Spi::Config, &tmsBuffers, &discardedBuffers, nullptr);
+
+    __ASSERT(result == 0, "Spi tms transceive failure: %d", result);
+
+    result = spi_transceive_signal(tdioDevice, &Spi::Config, &tdiBuffers, &tdoBuffers, &Spi::SignalDone);
+
+    __ASSERT(result == 0, "Spi tdi/tdo transceive failure: %d", result);
+
+    if (result == 0)
+    {
+        Spi::TransactionInProgress = true;
+    }
 }
 
 } // namespace Hardware
@@ -365,7 +488,7 @@ void OnPulsesCompleteIsr(void *arg)
             // gpio_pin_set_dt(&nssSpec, 0);
 
             // Direct register access should be safe
-            nssSpec.PortAddress->BSRR = (0x1'0000 << nssSpec.DtSpec.pin);
+            nssSpec.PortAddress->BSRR = (0x1 << nssSpec.DtSpec.pin);
         }
 
         k_sem_give(&Hardware::State::Lock);
@@ -373,47 +496,58 @@ void OnPulsesCompleteIsr(void *arg)
 }
 }
 
+constexpr unsigned testSize = 1;
+const uint8_t tmsBuffer[testSize] = {0x50};
+const uint8_t tdiBuffer[testSize] = {0x03};
+uint8_t tdoBuffer[testSize] = {0xFF};
+uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a destination to write to
+
 int main(void)
 {
     LOG_INF("Initialising...");
     // usb_enable(NULL);
 
     Hardware::InitialiseTimer();
+    Hardware::InitialiseSPI();
 
+    Hardware::SetupJtagSpi(7, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
     Hardware::StartClockingBits(7);
 
-#if 0
-    LOG_INF("Timer 1 dump");
-    LOG_INF("CR1:   %08x", Hardware::TimerAddress->CR1);
-    LOG_INF("CR2:   %08x", Hardware::TimerAddress->CR2);
-    LOG_INF("SMCR:  %08x", Hardware::TimerAddress->SMCR);
-    LOG_INF("DIER:  %08x", Hardware::TimerAddress->DIER);
-    LOG_INF("CCMR1: %08x", Hardware::TimerAddress->CCMR1);
-    LOG_INF("CCMR2: %08x", Hardware::TimerAddress->CCMR2);
-    LOG_INF("CCER:  %08x", Hardware::TimerAddress->CCER);
-    LOG_INF("CCR1:  %08x", Hardware::TimerAddress->CCR1);
-    LOG_INF("CCR2:  %08x", Hardware::TimerAddress->CCR2);
-    LOG_INF("CCR3:  %08x", Hardware::TimerAddress->CCR3);
-    LOG_INF("CCR4:  %08x", Hardware::TimerAddress->CCR4);
-    LOG_INF("PSC:   %08x", Hardware::TimerAddress->PSC);
-    LOG_INF("ARR:   %08x", Hardware::TimerAddress->ARR);
-#endif
-
-    LOG_INF("NSS1,2 TCK SCK");
+    LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
 
     for (int i = 0; i < 100; ++i)
     {
         const uint32_t idra = GPIOA->IDR;
         const uint32_t idrb = GPIOB->IDR;
         bool tck = idrb & (1 << 13);
+        bool tms = idrb & (1 << 4);
+        bool tdi = idrb & (1 << 14);
+        bool tdo = idrb & (1 << 15);
         bool sck0 = idrb & (1 << 0);
         bool sck1 = idrb & (1 << 1);
         bool nss1 = idra & (1 << 3);
         bool nss2 = idrb & (1 << 8);
 
-        LOG_INF("   %d,%d  %d   %d,%d", nss1, nss2, tck, sck0, sck1);
+        LOG_INF("   %d,%d %d,%d  %d   %d   %d   %d", nss1, nss2, sck0, sck1, tck, tms, tdi, tdo);
 
         k_msleep(100);
+
+        {
+            unsigned signalled;
+            int result;
+
+            k_poll_signal_check(&Hardware::Spi::SignalDone, &signalled, &result);
+
+            if (signalled != 0)
+            {
+                k_poll_signal_reset(&Hardware::Spi::SignalDone);
+                LOG_INF("SPI Done!");
+                for (unsigned i = 0; i < testSize; ++i)
+                {
+                    LOG_INF("%d: %02x", i, tdoBuffer[i]);
+                }
+            }
+        }
     }
 
     while (true)
