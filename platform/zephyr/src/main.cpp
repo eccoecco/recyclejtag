@@ -242,7 +242,7 @@ inline void ForEachPwm(auto callback)
     }
 }
 
-constexpr unsigned FullClockPeriod_Ticks = 1000;
+constexpr unsigned FullClockPeriod_Ticks = 2;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
