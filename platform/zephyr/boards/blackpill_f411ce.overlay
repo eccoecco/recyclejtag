@@ -32,7 +32,7 @@
     status = "okay";
 
     st,countermode = <0>; // Counter mode up
-    st,prescaler = <95>;
+    st,prescaler = <383>;
 
     pwm1: pwm {
         status = "okay";
@@ -98,6 +98,14 @@
     dmas = <&dma1 4 0 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
            <&dma1 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
     dma-names = "tx", "rx";
+};
+
+&spi1_miso_pb4 {
+    slew-rate = "very-high-speed";
+};
+
+&spi2_miso_pb14 {
+    slew-rate = "very-high-speed";
 };
 
 &spi2_mosi_pb15 {
