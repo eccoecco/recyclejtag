@@ -100,6 +100,12 @@
     dma-names = "tx", "rx";
 };
 
+&spi2_mosi_pb15 {
+    // OpenOCD works better if unconnected inputs read all 1s, instead of 0s
+    /delete-property/ bias-pull-down;
+    bias-pull-up;
+};
+
 // SPI2 uses DMA1
 &dma1 {
     status = "okay";
