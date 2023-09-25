@@ -109,6 +109,17 @@
     slew-rate = "very-high-speed";
 };
 
+&tim1_ch1n_pb13 {
+    slew-rate = "very-high-speed";
+};
+
+&tim1_ch2n_pb0 {
+    slew-rate = "very-high-speed";
+};
+&tim1_ch3n_pb1 {
+    slew-rate = "very-high-speed";
+};
+
 &spi2_mosi_pb15 {
     // OpenOCD works better if unconnected inputs read all 1s, instead of 0s
     /delete-property/ bias-pull-down;

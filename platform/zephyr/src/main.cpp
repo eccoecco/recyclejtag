@@ -519,12 +519,15 @@ void OnPulsesCompleteIsr(void *arg)
 constexpr unsigned testSize = 3;
 const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa};
 const uint8_t tdiBuffer[testSize] = {0x03, 0x02, 0x01};
-uint8_t tdoBuffer[testSize] = {0x01, 0x02, 0x03};
+uint8_t tdoBuffer[testSize] = {0x11, 0x22, 0x33};
 uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a destination to write to
 
 int main(void)
 {
     // usb_enable(NULL);
+
+    LOG_INF("OSPEEDR: %08x", GPIOB->OSPEEDR);
+    LOG_INF("PUPDR:   %08x", GPIOB->PUPDR);
 
     Hardware::InitialiseTimer();
     Hardware::InitialiseSPI();
