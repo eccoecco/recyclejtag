@@ -406,17 +406,10 @@ void WaitUntilSpiDone()
         return;
     }
 
-#pragma message("Use worker thread that just k_poll(events, 1, K_FOREVER) and releases a sync semaphore once signalled")
-    // Yeah, need a better way.  This busy wait is a bit silly.
+    k_poll_event event;
+    k_poll_event_init(&event, K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &Spi::SignalDone);
 
-    unsigned signalled;
-    int result;
-
-    do
-    {
-        k_msleep(5);
-        k_poll_signal_check(&Spi::SignalDone, &signalled, &result);
-    } while (signalled == 0);
+    k_poll(&event, 1, K_FOREVER);
 
     k_poll_signal_reset(&Spi::SignalDone);
 
@@ -530,7 +523,7 @@ void OnPulsesCompleteIsr(void *arg)
 constexpr unsigned testSize = 3;
 const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa};
 const uint8_t tdiBuffer[testSize] = {0x03, 0x02, 0x01};
-uint8_t tdoBuffer[testSize] = {0xFF, 0xFF, 0xFF};
+uint8_t tdoBuffer[testSize] = {0x01, 0x02, 0x03};
 uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a destination to write to
 
 int main(void)
@@ -544,6 +537,7 @@ int main(void)
     Hardware::SetupJtagSpi(21, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
     Hardware::StartClockingBits(21);
 
+#if 0
     LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
 
     for (int i = 0; i < 130; ++i)
@@ -579,6 +573,14 @@ int main(void)
                 }
             }
         }
+    }
+#endif
+
+    Hardware::WaitUntilSpiDone();
+    LOG_INF("SPI Done!");
+    for (unsigned i = 0; i < testSize; ++i)
+    {
+        LOG_INF("%d: %02x", i, tdoBuffer[i]);
     }
 
     while (true)
