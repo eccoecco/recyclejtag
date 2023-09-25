@@ -210,7 +210,11 @@ k_sem Lock;
 
 // Should only be written to if lock is acquired (free access from IRQ because
 // IRQ implicitly acquires lock)
-unsigned LeftoverBits = 0;
+unsigned BitsToBothClocks = 0;
+unsigned BitsToOnlySCK = 0;
+unsigned TotalBitsClocked = 0;
+
+static constexpr unsigned MaximumBitsPerRepetition = 256;
 
 } // namespace State
 
@@ -259,7 +263,9 @@ void InitialiseTimer()
     }
 
     k_sem_init(&State::Lock, 1, 1);
-    State::LeftoverBits = 0;
+    State::TotalBitsClocked = 0;
+    State::BitsToBothClocks = 0;
+    State::BitsToOnlySCK = 0;
 
     // STM32 PWM driver starts the counter to be free running on init
     LL_TIM_DisableCounter(TimerAddress);
@@ -300,15 +306,45 @@ static void UpdateChannel(int channel, unsigned value)
     }
 }
 
+static void SetupBitsToClock()
+{
+    unsigned clockPulses = State::BitsToBothClocks;
+
+    if (clockPulses > 0)
+    {
+        if (clockPulses > State::MaximumBitsPerRepetition)
+        {
+            // Can only send out 256 pulses at a time, as the repetition counter
+            // is 8 bits only
+            clockPulses = State::MaximumBitsPerRepetition;
+        }
+        State::BitsToBothClocks -= clockPulses;
+
+        LOG_INF("Setup %d bits to both clocks", clockPulses);
+    }
+    else
+    {
+        clockPulses = State::BitsToOnlySCK;
+        State::BitsToOnlySCK = 0;
+
+        LOG_INF("Setup %d bits to SCK only", clockPulses);
+    }
+
+    LL_TIM_SetRepetitionCounter(TimerAddress, clockPulses - 1);
+    LL_TIM_SetOnePulseMode(TimerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
+    LL_TIM_GenerateEvent_UPDATE(TimerAddress);
+    LL_TIM_EnableCounter(TimerAddress);
+}
+
 static void StartClockingBits(unsigned clockPulses)
 {
-    __ASSERT(clockPulses <= 256, "Clock pulses must be an 8-bit number, but got %d", clockPulses);
     __ASSERT(clockPulses > 0, "Clock pulses cannot be 0");
 
-    unsigned leftoverPulses = 8 - (clockPulses & 0x7);
-
     k_sem_take(&State::Lock, K_FOREVER);
-    State::LeftoverBits = leftoverPulses;
+
+    State::TotalBitsClocked = clockPulses;
+    State::BitsToBothClocks = clockPulses;
+    State::BitsToOnlySCK = 8 - (clockPulses & 7);
 
     for (const auto &nssSpec : Gpios::Nss)
     {
@@ -323,10 +359,7 @@ static void StartClockingBits(unsigned clockPulses)
         UpdateChannel(tckPwm.channel, HalfClockPeriod_Ticks - 1);
     }
 
-    LL_TIM_SetRepetitionCounter(TimerAddress, clockPulses - 1);
-    LL_TIM_SetOnePulseMode(TimerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
-    LL_TIM_GenerateEvent_UPDATE(TimerAddress);
-    LL_TIM_EnableCounter(TimerAddress);
+    SetupBitsToClock();
 }
 
 namespace Spi
@@ -460,23 +493,7 @@ void OnPulsesCompleteIsr(void *arg)
 
     LOG_INF("isr");
 
-    if (Hardware::State::LeftoverBits != 0)
-    {
-        unsigned leftoverBits = Hardware::State::LeftoverBits;
-        Hardware::State::LeftoverBits = 0;
-
-        // Set TCK to idle high when doing leftover bits
-        for (const auto &tckPwm : Hardware::Pwms::Tck)
-        {
-            Hardware::UpdateChannel(tckPwm.channel, Hardware::FullClockPeriod_Ticks);
-        }
-
-        LL_TIM_SetRepetitionCounter(Hardware::TimerAddress, leftoverBits - 1);
-        LL_TIM_SetOnePulseMode(Hardware::TimerAddress, LL_TIM_ONEPULSEMODE_SINGLE);
-        LL_TIM_GenerateEvent_UPDATE(Hardware::TimerAddress);
-        LL_TIM_EnableCounter(Hardware::TimerAddress);
-    }
-    else
+    if ((Hardware::State::BitsToBothClocks == 0) && (Hardware::State::BitsToOnlySCK == 0))
     {
         LOG_INF("end isr");
 
@@ -493,13 +510,27 @@ void OnPulsesCompleteIsr(void *arg)
 
         k_sem_give(&Hardware::State::Lock);
     }
+    else
+    {
+        if (Hardware::State::BitsToBothClocks == 0)
+        {
+            // Only clock pulses to sck left
+            // Set TCK to idle high when doing leftover bits
+            for (const auto &tckPwm : Hardware::Pwms::Tck)
+            {
+                Hardware::UpdateChannel(tckPwm.channel, Hardware::FullClockPeriod_Ticks);
+            }
+        }
+
+        Hardware::SetupBitsToClock();
+    }
 }
 }
 
-constexpr unsigned testSize = 1;
-const uint8_t tmsBuffer[testSize] = {0x50};
-const uint8_t tdiBuffer[testSize] = {0x03};
-uint8_t tdoBuffer[testSize] = {0xFF};
+constexpr unsigned testSize = 3;
+const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa};
+const uint8_t tdiBuffer[testSize] = {0x03, 0x02, 0x01};
+uint8_t tdoBuffer[testSize] = {0xFF, 0xFF, 0xFF};
 uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a destination to write to
 
 int main(void)
@@ -510,12 +541,12 @@ int main(void)
     Hardware::InitialiseTimer();
     Hardware::InitialiseSPI();
 
-    Hardware::SetupJtagSpi(7, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
-    Hardware::StartClockingBits(7);
+    Hardware::SetupJtagSpi(21, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
+    Hardware::StartClockingBits(21);
 
     LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
 
-    for (int i = 0; i < 100; ++i)
+    for (int i = 0; i < 130; ++i)
     {
         const uint32_t idra = GPIOA->IDR;
         const uint32_t idrb = GPIOB->IDR;
