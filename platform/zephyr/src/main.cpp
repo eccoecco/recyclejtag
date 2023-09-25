@@ -320,14 +320,14 @@ static void SetupBitsToClock()
         }
         State::BitsToBothClocks -= clockPulses;
 
-        LOG_INF("Setup %d bits to both clocks", clockPulses);
+        LOG_DBG("Setup %d bits to both clocks", clockPulses);
     }
     else
     {
         clockPulses = State::BitsToOnlySCK;
         State::BitsToOnlySCK = 0;
 
-        LOG_INF("Setup %d bits to SCK only", clockPulses);
+        LOG_DBG("Setup %d bits to SCK only", clockPulses);
     }
 
     LL_TIM_SetRepetitionCounter(TimerAddress, clockPulses - 1);
@@ -484,12 +484,8 @@ void OnPulsesCompleteIsr(void *arg)
 {
     LL_TIM_ClearFlag_UPDATE(Hardware::TimerAddress);
 
-    LOG_INF("isr");
-
     if ((Hardware::State::BitsToBothClocks == 0) && (Hardware::State::BitsToOnlySCK == 0))
     {
-        LOG_INF("end isr");
-
         for (const auto &nssSpec : Hardware::Gpios::Nss)
         {
             // Is this ISR safe in general?
@@ -528,7 +524,6 @@ uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a
 
 int main(void)
 {
-    LOG_INF("Initialising...");
     // usb_enable(NULL);
 
     Hardware::InitialiseTimer();
