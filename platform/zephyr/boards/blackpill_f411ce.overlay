@@ -99,27 +99,6 @@
     dma-names = "tx", "rx";
 };
 
-/*
-&spi1_miso_pb4 {
-    slew-rate = "very-high-speed";
-};
-
-&spi2_miso_pb14 {
-    slew-rate = "very-high-speed";
-};
-
-&tim1_ch1n_pb13 {
-    slew-rate = "very-high-speed";
-};
-
-&tim1_ch2n_pb0 {
-    slew-rate = "very-high-speed";
-};
-&tim1_ch3n_pb1 {
-    slew-rate = "very-high-speed";
-};
- */
-
 &spi2_mosi_pb15 {
     // OpenOCD works better if unconnected inputs read all 1s, instead of 0s
     /delete-property/ bias-pull-down;
@@ -135,11 +114,3 @@
 &dma2 {
     status = "okay";
 };
-
-/*
-&rcc {
-    // Apparently there's an SPI bug where if APB2 is too fast, then the LSB of SPI gets
-    // corrupt?  Doesn't seem to help.
-    apb2-prescaler = <2>;
-};
- */
