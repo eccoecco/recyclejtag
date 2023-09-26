@@ -84,7 +84,6 @@
     &spi1_miso_pb4 &spi1_mosi_pa7>;
     pinctrl-names = "default";
     status = "okay";
-
     dmas = <&dma2 5 3 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
            <&dma2 2 3 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
     dma-names = "tx", "rx";
@@ -95,12 +94,12 @@
     &spi2_miso_pb14 &spi2_mosi_pb15>;
     pinctrl-names = "default";
     status = "okay";
-
     dmas = <&dma1 4 0 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
            <&dma1 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
     dma-names = "tx", "rx";
 };
 
+/*
 &spi1_miso_pb4 {
     slew-rate = "very-high-speed";
 };
@@ -119,6 +118,7 @@
 &tim1_ch3n_pb1 {
     slew-rate = "very-high-speed";
 };
+ */
 
 &spi2_mosi_pb15 {
     // OpenOCD works better if unconnected inputs read all 1s, instead of 0s
@@ -135,3 +135,11 @@
 &dma2 {
     status = "okay";
 };
+
+/*
+&rcc {
+    // Apparently there's an SPI bug where if APB2 is too fast, then the LSB of SPI gets
+    // corrupt?  Doesn't seem to help.
+    apb2-prescaler = <2>;
+};
+ */
