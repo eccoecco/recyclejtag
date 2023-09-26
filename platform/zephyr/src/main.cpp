@@ -221,6 +221,20 @@ static constexpr unsigned MaximumBitsPerRepetition = 256;
 constexpr uint32_t TimerBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtimer));
 const auto TimerAddress = reinterpret_cast<TIM_TypeDef *>(TimerBaseAddress);
 
+constexpr uint32_t SpiTmsBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtms));
+const auto SpiTmsAddress = reinterpret_cast<SPI_TypeDef *>(SpiTmsBaseAddress);
+constexpr uint32_t SpiTmsDmaController = DT_REG_ADDR(DT_DMAS_CTLR(DT_ALIAS(rjtagtms)));
+
+constexpr uint32_t SpiTdioBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtdio));
+const auto SpiTdioAddress = reinterpret_cast<SPI_TypeDef *>(SpiTdioBaseAddress);
+constexpr uint32_t SpiTdioDmaController = DT_REG_ADDR(DT_DMAS_CTLR(DT_ALIAS(rjtagtdio)));
+constexpr uint32_t SpiTdioDmaRxChannel = DT_DMAS_CELL_BY_NAME(DT_ALIAS(rjtagtdio), rx, channel);
+constexpr uint32_t SpiTdioDmaRxSlot = DT_DMAS_CELL_BY_NAME(DT_ALIAS(rjtagtdio), rx, slot);
+constexpr uint32_t SpiTdioDmaRxChannelConfig = DT_DMAS_CELL_BY_NAME(DT_ALIAS(rjtagtdio), rx, channel_config);
+// There is also a "features" field, but that's for FIFO thresholds.  Let's not use the FIFO unless we have to.
+// TODO: Macros for grabbing all this information
+// TODO: tx channel as well
+
 enum class PwmTarget
 {
     Tck, //!< This timer is for generating TCK
@@ -242,7 +256,7 @@ inline void ForEachPwm(auto callback)
     }
 }
 
-constexpr unsigned FullClockPeriod_Ticks = 16;
+constexpr unsigned FullClockPeriod_Ticks = 2;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
@@ -320,14 +334,14 @@ static void SetupBitsToClock()
         }
         State::BitsToBothClocks -= clockPulses;
 
-        LOG_DBG("Setup %d bits to both clocks", clockPulses);
+        LOG_INF("Setup %d bits to both clocks", clockPulses);
     }
     else
     {
         clockPulses = State::BitsToOnlySCK;
         State::BitsToOnlySCK = 0;
 
-        LOG_DBG("Setup %d bits to SCK only", clockPulses);
+        LOG_INF("Setup %d bits to SCK only", clockPulses);
     }
 
     LL_TIM_SetRepetitionCounter(TimerAddress, clockPulses - 1);
@@ -362,28 +376,18 @@ static void StartClockingBits(unsigned clockPulses)
     SetupBitsToClock();
 }
 
-namespace Spi
-{
-
-static const spi_config Config = {
-    .frequency = 1'000'000,
-    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_LSB | SPI_MODE_CPHA | SPI_OP_MODE_SLAVE,
-    .slave = 0,
-};
-
-// TODO: Replace this boolean with a semaphore, similar to how the timer ISR has a semaphore
-// for sync
-static bool TransactionInProgress = false;
-
-static k_poll_signal SignalDone;
-
-} // namespace Spi
-
 void InitialiseSPI()
 {
-    k_poll_signal_init(&Spi::SignalDone);
-    k_poll_signal_reset(&Spi::SignalDone);
-
+    // Ensure that Zephyr has turned on the clocks for the SPI devices, and
+    // configured the GPIO pins.
+    //   At this time, even though SPI has an async/poll mechanism, the STM32
+    // driver for spi_transceive_signal() is interrupt based, and does *NOT*
+    // use DMA!  The problem is, at medium-ish SPI clock speeds (~1MHz), ISR
+    // based SPI transceive is not fast enough to reliably keep up.
+    //   If I want DMA based SPI transfer, I either use the blocking
+    // spi_transceive(), which would require me to spawn 2 separate threads
+    // (one for each blocking SPI operation), or I roll my own driver... and
+    // so I roll my own userspace driver.
     const device *tmsDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtms));
     if (!device_is_ready(tmsDevice))
     {
@@ -405,6 +409,43 @@ void WaitUntilSpiDone()
     {
         return;
     }
+
+#if 0
+    while (true)
+    {
+        k_sem_take(&State::Lock, K_FOREVER);
+
+        if ((Hardware::State::BitsToBothClocks == 0) && (Hardware::State::BitsToOnlySCK == 0))
+        {
+            break;
+        }
+
+        if (Hardware::State::BitsToBothClocks == 0)
+        {
+            // Only clock pulses to sck left
+            // Set TCK to idle high when doing leftover bits
+            for (const auto &tckPwm : Hardware::Pwms::Tck)
+            {
+                Hardware::UpdateChannel(tckPwm.channel, Hardware::FullClockPeriod_Ticks);
+            }
+        }
+
+        Hardware::SetupBitsToClock();
+    }
+
+    for (const auto &nssSpec : Hardware::Gpios::Nss)
+    {
+        // Is this ISR safe in general?
+        // In the case of the STM32, I think it is, but it may not be guaranteed
+        // in all platforms.
+        // gpio_pin_set_dt(&nssSpec, 0);
+
+        // Direct register access should be safe
+        nssSpec.PortAddress->BSRR = (0x1 << nssSpec.DtSpec.pin);
+    }
+
+    k_sem_give(&State::Lock);
+#endif
 
     k_poll_event event;
     k_poll_event_init(&event, K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &Spi::SignalDone);
@@ -483,7 +524,9 @@ extern "C"
 void OnPulsesCompleteIsr(void *arg)
 {
     LL_TIM_ClearFlag_UPDATE(Hardware::TimerAddress);
+    LOG_INF("isr");
 
+#if 1
     if ((Hardware::State::BitsToBothClocks == 0) && (Hardware::State::BitsToOnlySCK == 0))
     {
         for (const auto &nssSpec : Hardware::Gpios::Nss)
@@ -513,27 +556,36 @@ void OnPulsesCompleteIsr(void *arg)
 
         Hardware::SetupBitsToClock();
     }
+#else
+    k_sem_give(&Hardware::State::Lock);
+#endif
 }
 }
 
-constexpr unsigned testSize = 3;
-const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa};
-const uint8_t tdiBuffer[testSize] = {0x03, 0x02, 0x01};
-uint8_t tdoBuffer[testSize] = {0x11, 0x22, 0x33};
+constexpr unsigned testSize = 5;
+const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa, 0x55, 0x22};
+const uint8_t tdiBuffer[testSize] = {0x33, 0x22, 0x11, 0x22, 0x33};
+uint8_t tdoBuffer[testSize] = {0xee, 0xee, 0xee, 0xee, 0xee};
 uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a destination to write to
 
 int main(void)
 {
     // usb_enable(NULL);
 
+    LOG_INF("RCC CFGR: %08x", RCC->CFGR);
+
     LOG_INF("OSPEEDR: %08x", GPIOB->OSPEEDR);
     LOG_INF("PUPDR:   %08x", GPIOB->PUPDR);
 
     Hardware::InitialiseTimer();
+    // Timer needs to be initialised before SPI, as the communications clock needs
+    // to be set to the idle polarity before SPI is enabled, as per reference manual.
     Hardware::InitialiseSPI();
 
-    Hardware::SetupJtagSpi(21, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
-    Hardware::StartClockingBits(21);
+    const unsigned bitsToTest = testSize * 8 - 3;
+
+    Hardware::SetupJtagSpi(bitsToTest, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
+    Hardware::StartClockingBits(bitsToTest);
 
 #if 0
     LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
@@ -578,7 +630,7 @@ int main(void)
     LOG_INF("SPI Done!");
     for (unsigned i = 0; i < testSize; ++i)
     {
-        LOG_INF("%d: %02x", i, tdoBuffer[i]);
+        LOG_INF("%d: %02x (expected %02x)", i, tdoBuffer[i], tdiBuffer[i]);
     }
 
     while (true)
@@ -588,3 +640,8 @@ int main(void)
 
     return 0;
 }
+
+// TODO: Make sure that DMA is actually configured for SPI
+//   - Not for async - looks like it's only for transceive()?!
+// TODO: Move SPI/Timer stuff into own file
+// TODO: Sanity check to make sure that pins are connected together at startup
