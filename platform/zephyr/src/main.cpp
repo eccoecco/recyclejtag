@@ -244,7 +244,7 @@ inline void ForEachPwm(auto callback)
     }
 }
 
-constexpr unsigned FullClockPeriod_Ticks = 750;
+constexpr unsigned FullClockPeriod_Ticks = 2;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
@@ -779,7 +779,7 @@ int main(void)
     Hardware::SetupJtagSpi(bitsToTest, tmsBuffer, tdiBuffer, tdoBuffer);
     Hardware::StartClockingBits(bitsToTest);
 
-#if 1
+#if 0
     LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
 
     for (int i = 0; i < 160; ++i)
