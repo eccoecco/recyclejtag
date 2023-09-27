@@ -762,9 +762,12 @@ int main(void)
     // usb_enable(NULL);
 
     LOG_INF("RCC CFGR: %08x", RCC->CFGR);
-
     LOG_INF("OSPEEDR: %08x", GPIOB->OSPEEDR);
     LOG_INF("PUPDR:   %08x", GPIOB->PUPDR);
+
+    LOG_INF("AHB1ENR: %08x", RCC->AHB1ENR);
+    // Whoops, still have to enable DMA2 manually...
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMA2EN;
 
     Hardware::InitialiseTimer();
     // Timer needs to be initialised before SPI, as the communications clock needs
@@ -779,7 +782,7 @@ int main(void)
 #if 1
     LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
 
-    for (int i = 0; i < 130; ++i)
+    for (int i = 0; i < 160; ++i)
     {
         const uint32_t idra = GPIOA->IDR;
         const uint32_t idrb = GPIOB->IDR;
@@ -793,6 +796,17 @@ int main(void)
         bool nss2 = idrb & (1 << 8);
 
         LOG_INF("   %d,%d %d,%d  %d   %d   %d   %d", nss1, nss2, sck0, sck1, tck, tms, tdi, tdo);
+
+        if constexpr (false)
+        {
+            auto tmsDmaStream =
+                Hardware::GetDmaStream<Hardware::SpiTmsDetails.DmaBaseAddress, Hardware::SpiTmsDetails.DmaTx>();
+            auto tdiDmaStream =
+                Hardware::GetDmaStream<Hardware::SpiTdioDetails.DmaBaseAddress, Hardware::SpiTdioDetails.DmaTx>();
+            auto tdoDmaStream =
+                Hardware::GetDmaStream<Hardware::SpiTdioDetails.DmaBaseAddress, Hardware::SpiTdioDetails.DmaRx>();
+            LOG_INF("TMS %d, TDI %d, TDO %d", tmsDmaStream->NDTR, tdiDmaStream->NDTR, tdoDmaStream->NDTR);
+        }
 
         k_msleep(100);
 
