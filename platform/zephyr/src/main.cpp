@@ -547,12 +547,11 @@ static inline void EnableSpiDevice(unsigned totalBytes, const void *misoBuffer, 
     }
 
     // Set up for CPOL = 0, CPHA = 1, LSB first, 8-bit mode, no CRC
-    constexpr uint32_t cr1Base = SPI_CR1_SPE | SPI_CR1_LSBFIRST | SPI_CR1_CPHA;
-    // When in transmit only, select 1 line, output enabled (i.e. MISO for our case)
-    constexpr uint32_t cr1TransmitOnly = SPI_CR1_BIDIMODE | SPI_CR1_BIDIOE;
+    constexpr uint32_t cr1 = SPI_CR1_SPE | SPI_CR1_LSBFIRST | SPI_CR1_CPHA;
+    // When transmit-only, BIDIMODE = 0 and RXONLY = 0 (i.e. ignore MOSI pin)
+    // as per reference manual.  No need to apply special control flags here.
 
-    constexpr uint32_t cr1Final = cr1Base | ((spiDetail.Direction == SpiDirection::TransmitOnly) ? cr1TransmitOnly : 0);
-    spi->CR1 = cr1Final;
+    spi->CR1 = cr1;
 }
 
 void InitialiseSPI()
@@ -755,7 +754,7 @@ void OnPulsesCompleteIsr(void *arg)
 
 constexpr unsigned testSize = 5;
 const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa, 0x55, 0x22};
-const uint8_t tdiBuffer[testSize] = {0x33, 0x22, 0x11, 0x22, 0x33};
+const uint8_t tdiBuffer[testSize] = {0x43, 0x21, 0x01, 0x23, 0x45};
 uint8_t tdoBuffer[testSize] = {0xee, 0xee, 0xee, 0xee, 0xee};
 
 int main(void)
@@ -818,13 +817,13 @@ int main(void)
     }
 #endif
 
-    /*
-        Hardware::WaitUntilSpiDone();
-        LOG_INF("SPI Done!");
-        for (unsigned i = 0; i < testSize; ++i)
-        {
-            LOG_INF("%d: %02x (expected %02x)", i, tdoBuffer[i], tdiBuffer[i]);
-        }*/
+    k_sem_take(&Hardware::State::Lock, K_FOREVER);
+
+    LOG_INF("SPI Done!");
+    for (unsigned i = 0; i < testSize; ++i)
+    {
+        LOG_INF("%d: %02x (expected %02x)", i, tdoBuffer[i], tdiBuffer[i]);
+    }
 
     while (true)
     {
