@@ -27,6 +27,8 @@
 #include "platform_impl.h"
 #include "serial_queue.h"
 
+#include <stm32_ll_dma.h>
+#include <stm32_ll_spi.h>
 #include <stm32_ll_tim.h>
 
 #include <rjcore/rjcore.h>
@@ -221,20 +223,6 @@ static constexpr unsigned MaximumBitsPerRepetition = 256;
 constexpr uint32_t TimerBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtimer));
 const auto TimerAddress = reinterpret_cast<TIM_TypeDef *>(TimerBaseAddress);
 
-constexpr uint32_t SpiTmsBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtms));
-const auto SpiTmsAddress = reinterpret_cast<SPI_TypeDef *>(SpiTmsBaseAddress);
-constexpr uint32_t SpiTmsDmaController = DT_REG_ADDR(DT_DMAS_CTLR(DT_ALIAS(rjtagtms)));
-
-constexpr uint32_t SpiTdioBaseAddress = DT_REG_ADDR(DT_ALIAS(rjtagtdio));
-const auto SpiTdioAddress = reinterpret_cast<SPI_TypeDef *>(SpiTdioBaseAddress);
-constexpr uint32_t SpiTdioDmaController = DT_REG_ADDR(DT_DMAS_CTLR(DT_ALIAS(rjtagtdio)));
-constexpr uint32_t SpiTdioDmaRxChannel = DT_DMAS_CELL_BY_NAME(DT_ALIAS(rjtagtdio), rx, channel);
-constexpr uint32_t SpiTdioDmaRxSlot = DT_DMAS_CELL_BY_NAME(DT_ALIAS(rjtagtdio), rx, slot);
-constexpr uint32_t SpiTdioDmaRxChannelConfig = DT_DMAS_CELL_BY_NAME(DT_ALIAS(rjtagtdio), rx, channel_config);
-// There is also a "features" field, but that's for FIFO thresholds.  Let's not use the FIFO unless we have to.
-// TODO: Macros for grabbing all this information
-// TODO: tx channel as well
-
 enum class PwmTarget
 {
     Tck, //!< This timer is for generating TCK
@@ -256,7 +244,7 @@ inline void ForEachPwm(auto callback)
     }
 }
 
-constexpr unsigned FullClockPeriod_Ticks = 2;
+constexpr unsigned FullClockPeriod_Ticks = 750;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
 void ConfigurePWM(const pwm_dt_spec &pwmDeviceTree, Hardware::PwmTarget pwmTarget)
@@ -376,10 +364,201 @@ static void StartClockingBits(unsigned clockPulses)
     SetupBitsToClock();
 }
 
+struct DmaChannelDetails
+{
+    uint32_t Channel;
+    uint32_t Slot;
+    uint32_t ChannelConfig;
+
+    constexpr DmaChannelDetails(uint32_t channel, uint32_t slot, uint32_t channelConfig)
+        : Channel{channel}, Slot{slot}, ChannelConfig{channelConfig}
+    {
+    }
+};
+
+enum class SpiDirection
+{
+    TransmitOnly,
+    Bidirectional,
+};
+
+struct SpiDetails
+{
+    uint32_t SpiBaseAddress;
+    uint32_t DmaBaseAddress;
+    SpiDirection Direction;
+    DmaChannelDetails DmaRx;
+    DmaChannelDetails DmaTx;
+
+    constexpr SpiDetails(uint32_t spiBaseAddress, uint32_t dmaBaseAddress, SpiDirection direction,
+                         DmaChannelDetails dmaRx, DmaChannelDetails dmaTx)
+        : SpiBaseAddress{spiBaseAddress}, DmaBaseAddress{dmaBaseAddress}, Direction{direction}, DmaRx{dmaRx},
+          DmaTx{dmaTx}
+    {
+    }
+
+    auto SpiAddress() const
+    {
+        return reinterpret_cast<SPI_TypeDef *>(SpiBaseAddress);
+    }
+
+    auto DmaAddress() const
+    {
+        return reinterpret_cast<DMA_TypeDef *>(DmaBaseAddress);
+    }
+};
+
+#define DMA_CHANNEL_DETAILS_FROM_DT(node, name)                                                                        \
+    DmaChannelDetails                                                                                                  \
+    {                                                                                                                  \
+        DT_DMAS_CELL_BY_NAME(node, name, channel), DT_DMAS_CELL_BY_NAME(node, name, slot),                             \
+            DT_DMAS_CELL_BY_NAME(node, name, channel_config)                                                           \
+    }
+
+#define SPI_DETAILS_FROM_DT(node, direction)                                                                           \
+    SpiDetails                                                                                                         \
+    {                                                                                                                  \
+        DT_REG_ADDR(node), DT_REG_ADDR(DT_DMAS_CTLR(node)), direction, DMA_CHANNEL_DETAILS_FROM_DT(node, rx),          \
+            DMA_CHANNEL_DETAILS_FROM_DT(node, tx)                                                                      \
+    }
+
+constexpr auto SpiTmsDetails = SPI_DETAILS_FROM_DT(DT_ALIAS(rjtagtms), SpiDirection::TransmitOnly);
+constexpr auto SpiTdioDetails = SPI_DETAILS_FROM_DT(DT_ALIAS(rjtagtdio), SpiDirection::Bidirectional);
+
+template <SpiDetails spiDetail> static inline void InitialiseSpiDevice()
+{
+    auto spi = spiDetail.SpiAddress();
+
+    // Disable everything first
+    spi->CR1 = 0;
+    // No interrupts used, SPI in "motorola mode" (as opposed to "TI" mode), and DMA events
+    // generated on tx empty/rx not empty
+    spi->CR2 = SPI_CR2_TXDMAEN | SPI_CR2_RXDMAEN;
+}
+
+template <uint32_t dmaBaseAddress, DmaChannelDetails dmaChannel> inline DMA_Stream_TypeDef *GetDmaStream()
+{
+    static_assert((dmaBaseAddress == DMA1_BASE) || (dmaBaseAddress == DMA2_BASE), "Unknown DMA base address");
+    static_assert(dmaChannel.Channel < 8, "Only 8 dma channels");
+
+    if constexpr (dmaBaseAddress == DMA1_BASE)
+    {
+        constexpr DMA_Stream_TypeDef *streamAddresses[] = {
+            DMA1_Stream0, DMA1_Stream1, DMA1_Stream2, DMA1_Stream3,
+            DMA1_Stream4, DMA1_Stream5, DMA1_Stream6, DMA1_Stream7,
+        };
+
+        return streamAddresses[dmaChannel.Channel];
+    }
+
+    if constexpr (dmaBaseAddress == DMA2_BASE)
+    {
+        constexpr DMA_Stream_TypeDef *streamAddresses[] = {
+            DMA2_Stream0, DMA2_Stream1, DMA2_Stream2, DMA2_Stream3,
+            DMA2_Stream4, DMA2_Stream5, DMA2_Stream6, DMA2_Stream7,
+        };
+
+        return streamAddresses[dmaChannel.Channel];
+    }
+
+    return nullptr;
+}
+
+template <uint32_t dmaBaseAddress, DmaChannelDetails dmaChannel> inline void ClearDmaFlags()
+{
+    constexpr bool highRegister = (dmaChannel.Channel >= 4);
+    constexpr int setIndex = highRegister ? (dmaChannel.Channel - 4) : dmaChannel.Channel;
+    constexpr int bitShift = (setIndex == 0) ? 0 : (setIndex == 1) ? 6 : (setIndex == 2) ? 16 : 22;
+
+    constexpr uint32_t clearValue = 0b111101 << bitShift;
+
+    auto dma = reinterpret_cast<DMA_TypeDef *>(dmaBaseAddress);
+
+    if (highRegister)
+    {
+        dma->HIFCR = clearValue;
+    }
+    else
+    {
+        dma->LIFCR = clearValue;
+    }
+}
+
+template <uint32_t dmaBaseAddress, DmaChannelDetails dmaChannel> static inline void DisableDmaChannel()
+{
+    auto stream = GetDmaStream<dmaBaseAddress, dmaChannel>();
+    stream->CR = 0;
+    ClearDmaFlags<dmaBaseAddress, dmaChannel>();
+}
+
+template <SpiDetails spiDetail> static inline void DisableDmaChannels()
+{
+    DisableDmaChannel<spiDetail.DmaBaseAddress, spiDetail.DmaTx>();
+
+    if constexpr (spiDetail.Direction == SpiDirection::Bidirectional)
+    {
+        DisableDmaChannel<spiDetail.DmaBaseAddress, spiDetail.DmaRx>();
+    }
+}
+
+template <SpiDetails spiDetail, DmaChannelDetails dmaChannel, typename DataBuffer>
+static inline void SetupDmaChannel(unsigned totalBytes, DataBuffer buffer)
+{
+    constexpr uint32_t dataTransferDirection = dmaChannel.ChannelConfig & DMA_SxCR_DIR_Msk;
+    // ??? Not a bug - checking for the value of MEMORY_TO_MEMORY because Zephyr seems to map
+    // STM32_DMA_PERIPH_TO_MEMORY to the value of memory to memory?
+    static_assert(
+        (dataTransferDirection == LL_DMA_DIRECTION_MEMORY_TO_MEMORY) ||
+            (dataTransferDirection == LL_DMA_DIRECTION_MEMORY_TO_PERIPH),
+        "DMA channel configuration word must have a direction of memory -> peripheral, or peripheral -> memory");
+
+    // So in the reference manual (rm0383), the "peripheral to memory" value is 0, but STM32_DMA_PERIPH_TO_MEMORY
+    // defines it as 2.  Remap that.  Luckily, "memory to peripheral" stays at 1 in both mappings.
+
+    constexpr uint32_t remappedChannelConfig = (dataTransferDirection == LL_DMA_DIRECTION_MEMORY_TO_MEMORY)
+                                                   ? (dmaChannel.ChannelConfig & ~DMA_SxCR_DIR_Msk)
+                                                   : dmaChannel.ChannelConfig;
+    // DMA is the flow controller.  No need for interrupts, because the timer that generates the SCK pulses and
+    // deasserts NSS knows when the SPI is finished.
+    constexpr uint32_t channelConfig = remappedChannelConfig | (dmaChannel.Slot << DMA_SxCR_CHSEL_Pos) | DMA_SxCR_EN;
+
+    auto stream = GetDmaStream<spiDetail.DmaBaseAddress, dmaChannel>();
+
+    stream->NDTR = totalBytes;
+    stream->PAR = spiDetail.SpiBaseAddress + offsetof(SPI_TypeDef, DR);
+    stream->M0AR = reinterpret_cast<uint32_t>(buffer);
+    stream->CR = channelConfig;
+}
+
+template <SpiDetails spiDetail>
+static inline void EnableSpiDevice(unsigned totalBytes, const void *misoBuffer, void *mosiBuffer)
+{
+    auto spi = spiDetail.SpiAddress();
+
+    // Temporarily disable everything while we set up
+    spi->CR1 = 0;
+    DisableDmaChannels<spiDetail>();
+
+    SetupDmaChannel<spiDetail, spiDetail.DmaTx>(totalBytes, misoBuffer);
+    if constexpr (spiDetail.Direction == SpiDirection::Bidirectional)
+    {
+        __ASSERT(mosiBuffer != nullptr, "Bidirectional SPI, but NULL mosi buffer");
+        SetupDmaChannel<spiDetail, spiDetail.DmaRx>(totalBytes, mosiBuffer);
+    }
+
+    // Set up for CPOL = 0, CPHA = 1, LSB first, 8-bit mode, no CRC
+    constexpr uint32_t cr1Base = SPI_CR1_SPE | SPI_CR1_LSBFIRST | SPI_CR1_CPHA;
+    // When in transmit only, select 1 line, output enabled (i.e. MISO for our case)
+    constexpr uint32_t cr1TransmitOnly = SPI_CR1_BIDIMODE | SPI_CR1_BIDIOE;
+
+    constexpr uint32_t cr1Final = cr1Base | ((spiDetail.Direction == SpiDirection::TransmitOnly) ? cr1TransmitOnly : 0);
+    spi->CR1 = cr1Final;
+}
+
 void InitialiseSPI()
 {
-    // Ensure that Zephyr has turned on the clocks for the SPI devices, and
-    // configured the GPIO pins.
+    // Use Zephyr's SPI drivers to initialise the system - i.e. turned on the
+    // clocks for the SPI devices, and configured the GPIO pins.
     //   At this time, even though SPI has an async/poll mechanism, the STM32
     // driver for spi_transceive_signal() is interrupt based, and does *NOT*
     // use DMA!  The problem is, at medium-ish SPI clock speeds (~1MHz), ISR
@@ -401,10 +580,14 @@ void InitialiseSPI()
         LOG_ERR("SPI for TDI/TDO is not ready");
         return;
     }
+
+    InitialiseSpiDevice<SpiTmsDetails>();
+    InitialiseSpiDevice<SpiTdioDetails>();
 }
 
 void WaitUntilSpiDone()
 {
+#if 0
     if (!Spi::TransactionInProgress)
     {
         return;
@@ -455,10 +638,17 @@ void WaitUntilSpiDone()
     k_poll_signal_reset(&Spi::SignalDone);
 
     Spi::TransactionInProgress = false;
+#endif
 }
 
-void SetupJtagSpi(unsigned totalBits, const uint8_t *tms, const uint8_t *tdi, uint8_t *tdo, uint8_t *discarded)
+void SetupJtagSpi(unsigned totalBits, const uint8_t *tms, const uint8_t *tdi, uint8_t *tdo)
 {
+    const unsigned bytesToSend = (totalBits + 7) >> 3;
+
+    EnableSpiDevice<SpiTmsDetails>(bytesToSend, tms, nullptr);
+    EnableSpiDevice<SpiTdioDetails>(bytesToSend, tdi, tdo);
+
+#if 0
     const device *tmsDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtms));
     const device *tdioDevice = DEVICE_DT_GET(DT_ALIAS(rjtagtdio));
 
@@ -515,6 +705,7 @@ void SetupJtagSpi(unsigned totalBits, const uint8_t *tms, const uint8_t *tdi, ui
     {
         Spi::TransactionInProgress = true;
     }
+#endif
 }
 
 } // namespace Hardware
@@ -566,7 +757,6 @@ constexpr unsigned testSize = 5;
 const uint8_t tmsBuffer[testSize] = {0x50, 0x05, 0xaa, 0x55, 0x22};
 const uint8_t tdiBuffer[testSize] = {0x33, 0x22, 0x11, 0x22, 0x33};
 uint8_t tdoBuffer[testSize] = {0xee, 0xee, 0xee, 0xee, 0xee};
-uint8_t discardedBuffer[testSize]; // Async transceive for STM32 seems to need a destination to write to
 
 int main(void)
 {
@@ -584,10 +774,10 @@ int main(void)
 
     const unsigned bitsToTest = testSize * 8 - 3;
 
-    Hardware::SetupJtagSpi(bitsToTest, tmsBuffer, tdiBuffer, tdoBuffer, discardedBuffer);
+    Hardware::SetupJtagSpi(bitsToTest, tmsBuffer, tdiBuffer, tdoBuffer);
     Hardware::StartClockingBits(bitsToTest);
 
-#if 0
+#if 1
     LOG_INF("NSS1,2 SCK TCK TMS TDI TDO");
 
     for (int i = 0; i < 130; ++i)
@@ -607,6 +797,7 @@ int main(void)
 
         k_msleep(100);
 
+#if 0
         {
             unsigned signalled;
             int result;
@@ -623,15 +814,17 @@ int main(void)
                 }
             }
         }
+#endif
     }
 #endif
 
-    Hardware::WaitUntilSpiDone();
-    LOG_INF("SPI Done!");
-    for (unsigned i = 0; i < testSize; ++i)
-    {
-        LOG_INF("%d: %02x (expected %02x)", i, tdoBuffer[i], tdiBuffer[i]);
-    }
+    /*
+        Hardware::WaitUntilSpiDone();
+        LOG_INF("SPI Done!");
+        for (unsigned i = 0; i < testSize; ++i)
+        {
+            LOG_INF("%d: %02x (expected %02x)", i, tdoBuffer[i], tdiBuffer[i]);
+        }*/
 
     while (true)
     {
