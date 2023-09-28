@@ -34,7 +34,7 @@
     status = "okay";
 
     st,countermode = <0>; // Counter mode up
-    st,prescaler = <47>; // Full speed
+    st,prescaler = <11>; // Decent speed Jtag (~2MHz)
     // st,prescaler = <47999>; // Very low speed, useful for debugging
 
     pwm1: pwm {

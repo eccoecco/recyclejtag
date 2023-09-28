@@ -29,7 +29,9 @@ namespace Hardware
 
 // This configures how many ticks it takes for a full SCK/TCK clock period
 // This is after the prescaler set in the timer's overlay
-constexpr unsigned FullClockPeriod_Ticks = 2;
+
+#pragma message("TODO: Fix bug where FullClockPeriod_Ticks = 2 does not work")
+constexpr unsigned FullClockPeriod_Ticks = 4;
 constexpr unsigned HalfClockPeriod_Ticks = FullClockPeriod_Ticks / 2;
 
 namespace Pwms
@@ -199,7 +201,7 @@ static void StartClockingBits(unsigned clockPulses)
 
     State::TotalBitsClocked = clockPulses;
     State::BitsToBothClocks = clockPulses;
-    State::BitsToOnlySCK = 8 - (clockPulses & 7);
+    State::BitsToOnlySCK = (8 - (clockPulses & 7)) & 7;
 
     for (const auto &nssSpec : Gpios::Nss)
     {
@@ -541,6 +543,10 @@ int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bi
         Hardware::StartClockingBits(bitsToParse);
 
         k_sem_take(&Hardware::State::Lock, K_FOREVER);
+
+#pragma message("TODO: Verify that dma to tdo has completed by checking NDTR")
+
+        k_sem_give(&Hardware::State::Lock);
 
         PlatformImpl_TransmitData(privateData, SpiBuffer.Tdo, bytesToParse);
     }
