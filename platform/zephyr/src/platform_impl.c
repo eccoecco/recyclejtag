@@ -42,14 +42,6 @@ __attribute__((weak)) int PlatformImpl_TapShiftPacket(void *, const uint8_t *buf
 
 struct RJCorePlatform *PlatformImpl_Init()
 {
-    // For now, initialise the gpio pins here, but really should be done in set port mode
-    // (to pull it back into high impedance)
-
-    gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
-    gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
-    gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
-    gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
-
     if (PlatformImpl_HasShiftPacket())
     {
         LOG_INF("Using tap shift packet mode");
@@ -74,15 +66,26 @@ bool PlatformImpl_SetSerialMode(void *, enum RJCoreSerialMode mode)
     return true;
 }
 
-bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode)
+__attribute__((weak)) bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode)
 {
+    // Different platform implementations might have different ways to enable gpio pins
     switch (mode)
     {
     case RJCorePortMode_HighImpedance:
+        LOG_INF("Jtag port in high impedance mode");
+        gpio_pin_configure_dt(&rjTck, GPIO_INPUT);
+        gpio_pin_configure_dt(&rjTms, GPIO_INPUT);
+        gpio_pin_configure_dt(&rjTdi, GPIO_INPUT);
         break;
     case RJCorePortMode_PushPull:
+        LOG_INF("Jtag port in push/pull mode");
+        gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
+        gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
+        gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
+        gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
         break;
     case RJCorePortMode_OpenDrain:
+        LOG_ERR("Not configuring to open drain");
         break;
     default:
         LOG_ERR("Unknown port mode");
