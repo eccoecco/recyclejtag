@@ -84,16 +84,14 @@ __attribute__((weak)) bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode 
 #endif
         break;
     case RJCorePortMode_PushPull:
-        LOG_INF("Jtag port in push/pull mode");
+    case RJCorePortMode_OpenDrain:
+        LOG_INF("Jtag port in output mode");
 #ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
         gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
         gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
         gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
         gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
 #endif
-        break;
-    case RJCorePortMode_OpenDrain:
-        LOG_ERR("Not configuring to open drain");
         break;
     default:
         LOG_ERR("Unknown port mode");
