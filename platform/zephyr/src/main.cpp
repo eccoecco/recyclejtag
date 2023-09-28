@@ -35,7 +35,7 @@
 
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
 
-#if 0
+#if 1
 
 struct serial_queue usb_rx; //!< Received over USB (to us)
 struct serial_queue usb_tx; //!< Send over USB (to host)
@@ -170,6 +170,8 @@ int main(void)
     return 0;
 }
 #endif
+
+#if 0
 
 extern "C"
 {
@@ -847,7 +849,12 @@ int main(void)
     return 0;
 }
 
-// TODO: Make sure that DMA is actually configured for SPI
-//   - Not for async - looks like it's only for transceive()?!
 // TODO: Move SPI/Timer stuff into own file
+// TODO: Sanity check by making sure that NSS pins are connected
 // TODO: Sanity check to make sure that pins are connected together at startup
+//       Do this by having the timer have 24 SCK bits, and checking the DMA NDTR
+//       register (need to send 3 bytes, because the SPI peripheral effectively
+//       buffers 2 bytes for Tx)
+// TODO: Maybe double buffer the SPI peripherals?
+
+#endif
