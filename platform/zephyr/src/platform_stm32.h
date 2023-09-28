@@ -18,6 +18,7 @@
 #elif DT_NODE_EXISTS(DT_NODELABEL(rjtagtck)) && DT_NODE_EXISTS(DT_NODELABEL(rjtagsck))
 // Device tree has both tck and sck defined - hopefully as timers
 #define RJTAG_STM32_USE_TIMER_SPI
+#define RJTAG_NO_DEFAULT_PLATFORM_IMPL
 #endif
 
 #endif

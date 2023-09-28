@@ -5,6 +5,7 @@
 #ifdef RJTAG_STM32_USE_GPIO
 
 #pragma message("Using STM32 specific GPIO bit bashing")
+#pragma message("TODO: Improve performance by loop unrolling")
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>

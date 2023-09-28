@@ -12,6 +12,7 @@ target_sources(app
     src/platform_impl.h
     src/platform_stm32.h
     src/platform_stm32_gpio.cpp
+    src/platform_stm32_timer_spi.cpp
     src/serial_queue.c
     src/serial_queue.h
 )

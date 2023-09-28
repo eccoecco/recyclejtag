@@ -1,4 +1,5 @@
 #include "platform_impl.h"
+#include "platform_stm32.h"
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
@@ -6,10 +7,13 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(rjtag, LOG_LEVEL_INF);
 
+// Some platform implementations don't rely on gpio, and so this doesn't exist
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
 static const struct gpio_dt_spec rjTck = GPIO_DT_SPEC_GET(DT_NODELABEL(tck), gpios);
 static const struct gpio_dt_spec rjTms = GPIO_DT_SPEC_GET(DT_NODELABEL(tms), gpios);
 static const struct gpio_dt_spec rjTdo = GPIO_DT_SPEC_GET(DT_NODELABEL(tdo), gpios);
 static const struct gpio_dt_spec rjTdi = GPIO_DT_SPEC_GET(DT_NODELABEL(tdi), gpios);
+#endif
 
 static struct RJCorePlatform rjcorePlatform = {
     .tapShiftMode = RJCoreTapShiftMode_GPIO,
@@ -73,16 +77,20 @@ __attribute__((weak)) bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode 
     {
     case RJCorePortMode_HighImpedance:
         LOG_INF("Jtag port in high impedance mode");
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
         gpio_pin_configure_dt(&rjTck, GPIO_INPUT);
         gpio_pin_configure_dt(&rjTms, GPIO_INPUT);
         gpio_pin_configure_dt(&rjTdi, GPIO_INPUT);
+#endif
         break;
     case RJCorePortMode_PushPull:
         LOG_INF("Jtag port in push/pull mode");
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
         gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
         gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
         gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
         gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
+#endif
         break;
     case RJCorePortMode_OpenDrain:
         LOG_ERR("Not configuring to open drain");
@@ -123,6 +131,7 @@ __attribute__((weak)) void PlatformImpl_TapShiftComplete(void *privateData)
 
 int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
 {
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
     gpio_pin_set_dt(&rjTck, 0);
     gpio_pin_set_dt(&rjTdi, tdi != 0);
     gpio_pin_set_dt(&rjTms, tms != 0);
@@ -130,4 +139,7 @@ int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
     gpio_pin_set_dt(&rjTck, 1);
 
     return gpio_pin_get_dt(&rjTdo);
+#else
+    return 0;
+#endif
 }
