@@ -856,5 +856,8 @@ int main(void)
 //       register (need to send 3 bytes, because the SPI peripheral effectively
 //       buffers 2 bytes for Tx)
 // TODO: Maybe double buffer the SPI peripherals?
+// TODO: Make led blink based on status (e.g. NSS not connected, SCK not connected,
+//       etc...)
+// TODO: Put all these issues into Github
 
 #endif
