@@ -1,27 +1,118 @@
+/*
 / {
     rjtag {
         compatible = "gpio-keys";
 
         tck: tck  {
-            gpios = <&gpiob 12 GPIO_ACTIVE_HIGH>;
-        };
-
-        tms: tms  {
             gpios = <&gpiob 13 GPIO_ACTIVE_HIGH>;
         };
 
+        tms: tms  {
+            gpios = <&gpiob 4 GPIO_ACTIVE_HIGH>;
+        };
+
         tdo: tdo  {
-            gpios = <&gpiob 14 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+            gpios = <&gpiob 15 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
         };
 
         tdi: tdi  {
-            gpios = <&gpiob 15 GPIO_ACTIVE_HIGH>;
+            gpios = <&gpiob 14 GPIO_ACTIVE_HIGH>;
         };
     };
 };
+ */
 
 &zephyr_udc0 {
     cdc_acm_uart0 {
         compatible = "zephyr,cdc-acm-uart";
     };
+};
+
+// Used for the hardware driven JTAG signals
+
+&timers1 {
+    status = "okay";
+
+    st,countermode = <0>; // Counter mode up
+    st,prescaler = <11>; // Decent speed Jtag (~2MHz)
+    // st,prescaler = <47999>; // Very low speed, useful for debugging
+
+    pwm1: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim1_ch1n_pb13 &tim1_ch2n_pb0 &tim1_ch3n_pb1>;
+        pinctrl-names = "default";
+    };
+};
+
+/ {
+    rjtaghw {
+        compatible = "pwm-leds";
+        status = "okay";
+
+        // If using an complementary channel (e.g. ch1n, ch2n, ch3n, ch4n...)
+        // then you must add the STM32_PWM_COMPLEMENTARY flag
+        // SCK set up for CPOL=0, CPHA=1 (i.e. clock idle low, change on rising
+        // edge, sample on falling edge)
+        rjtagsck: rjtagsck {
+            pwms = <&pwm1 2 1000 (PWM_POLARITY_INVERTED | STM32_PWM_COMPLEMENTARY)>,
+                   <&pwm1 3 1000 (PWM_POLARITY_INVERTED | STM32_PWM_COMPLEMENTARY)>;
+        };
+
+        // TCK set up for CPOL=1, CPHA=1 (i.e. clock idle high, change on falling
+        // edge, sample on rising edge)
+        rjtagtck: rjtagtck {
+            pwms = <&pwm1 1 1000 (PWM_POLARITY_NORMAL | STM32_PWM_COMPLEMENTARY)>;
+        };
+    };
+
+    rjtagss {
+        compatible = "gpio-keys";
+
+        rjtagnss: rjtagnss  {
+            gpios = <&gpioa 3 GPIO_ACTIVE_LOW>,
+                    <&gpiob 8 GPIO_ACTIVE_LOW>;
+        };
+    };
+
+    aliases {
+        rjtagtimer = &timers1;
+        rjtagtms = &spi1;
+        rjtagtdio = &spi2;
+    };
+};
+
+&spi1 {
+    pinctrl-0 = <&spi1_sck_pa5 &spi1_nss_pa4
+    &spi1_miso_pb4 &spi1_mosi_pa7>;
+    pinctrl-names = "default";
+    status = "okay";
+    dmas = <&dma2 5 3 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
+           <&dma2 2 3 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
+    dma-names = "tx", "rx";
+};
+
+&spi2 {
+    pinctrl-0 = <&spi2_sck_pb10 &spi2_nss_pb9
+    &spi2_miso_pb14 &spi2_mosi_pb15>;
+    pinctrl-names = "default";
+    status = "okay";
+    dmas = <&dma1 4 0 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH) 0x03>,
+           <&dma1 3 0 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH) 0x03>;
+    dma-names = "tx", "rx";
+};
+
+&spi2_mosi_pb15 {
+    // OpenOCD works better if unconnected inputs read all 1s, instead of 0s
+    /delete-property/ bias-pull-down;
+    bias-pull-up;
+};
+
+// SPI2 uses DMA1
+&dma1 {
+    status = "okay";
+};
+
+// SPI1 uses DMA2
+&dma2 {
+    status = "okay";
 };

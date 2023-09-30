@@ -1,12 +1,19 @@
 #include <zephyr/kernel.h>
 
-#ifdef CONFIG_SOC_FAMILY_STM32
+#include "platform_stm32.h"
+
+#ifdef RJTAG_STM32_USE_GPIO
+
+#pragma message("Using STM32 specific GPIO bit bashing")
+#pragma message("TODO: Improve performance by loop unrolling")
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(rjtag, LOG_LEVEL_INF);
 
 #include "platform_impl.h"
+
+#include <cstddef>
 
 namespace
 {

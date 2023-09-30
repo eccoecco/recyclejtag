@@ -1,4 +1,5 @@
 #include "platform_impl.h"
+#include "platform_stm32.h"
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
@@ -6,10 +7,13 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(rjtag, LOG_LEVEL_INF);
 
+// Some platform implementations don't rely on gpio, and so this doesn't exist
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
 static const struct gpio_dt_spec rjTck = GPIO_DT_SPEC_GET(DT_NODELABEL(tck), gpios);
 static const struct gpio_dt_spec rjTms = GPIO_DT_SPEC_GET(DT_NODELABEL(tms), gpios);
 static const struct gpio_dt_spec rjTdo = GPIO_DT_SPEC_GET(DT_NODELABEL(tdo), gpios);
 static const struct gpio_dt_spec rjTdi = GPIO_DT_SPEC_GET(DT_NODELABEL(tdi), gpios);
+#endif
 
 static struct RJCorePlatform rjcorePlatform = {
     .tapShiftMode = RJCoreTapShiftMode_GPIO,
@@ -42,14 +46,6 @@ __attribute__((weak)) int PlatformImpl_TapShiftPacket(void *, const uint8_t *buf
 
 struct RJCorePlatform *PlatformImpl_Init()
 {
-    // For now, initialise the gpio pins here, but really should be done in set port mode
-    // (to pull it back into high impedance)
-
-    gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
-    gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
-    gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
-    gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
-
     if (PlatformImpl_HasShiftPacket())
     {
         LOG_INF("Using tap shift packet mode");
@@ -74,15 +70,28 @@ bool PlatformImpl_SetSerialMode(void *, enum RJCoreSerialMode mode)
     return true;
 }
 
-bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode)
+__attribute__((weak)) bool PlatformImpl_SetPortMode(void *, enum RJCorePortMode mode)
 {
+    // Different platform implementations might have different ways to enable gpio pins
     switch (mode)
     {
     case RJCorePortMode_HighImpedance:
+        LOG_INF("Jtag port in high impedance mode");
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
+        gpio_pin_configure_dt(&rjTck, GPIO_INPUT);
+        gpio_pin_configure_dt(&rjTms, GPIO_INPUT);
+        gpio_pin_configure_dt(&rjTdi, GPIO_INPUT);
+#endif
         break;
     case RJCorePortMode_PushPull:
-        break;
     case RJCorePortMode_OpenDrain:
+        LOG_INF("Jtag port in output mode");
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
+        gpio_pin_configure_dt(&rjTck, GPIO_OUTPUT_LOW);
+        gpio_pin_configure_dt(&rjTms, GPIO_OUTPUT_LOW);
+        gpio_pin_configure_dt(&rjTdi, GPIO_OUTPUT_LOW);
+        gpio_pin_configure_dt(&rjTdo, GPIO_INPUT);
+#endif
         break;
     default:
         LOG_ERR("Unknown port mode");
@@ -106,18 +115,21 @@ void PlatformImpl_ReadVoltages(void *, uint16_t *values)
     }
 }
 
-void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
+// Weak linkage for new tap and shift just in case a platform implementation requires
+// platform specific initialisation and cleanup.
+__attribute__((weak)) void PlatformImpl_NewTapShift(void *privateData, int totalBitsToShift)
 {
     LOG_DBG("Starting to shift %d bits", totalBitsToShift);
 }
 
-void PlatformImpl_TapShiftComplete(void *privateData)
+__attribute__((weak)) void PlatformImpl_TapShiftComplete(void *privateData)
 {
     LOG_DBG("Shift complete");
 }
 
 int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
 {
+#ifndef RJTAG_NO_DEFAULT_PLATFORM_IMPL
     gpio_pin_set_dt(&rjTck, 0);
     gpio_pin_set_dt(&rjTdi, tdi != 0);
     gpio_pin_set_dt(&rjTms, tms != 0);
@@ -125,4 +137,7 @@ int PlatformImpl_TapShiftGPIOClock(void *, int tdi, int tms)
     gpio_pin_set_dt(&rjTck, 1);
 
     return gpio_pin_get_dt(&rjTdo);
+#else
+    return 0;
+#endif
 }

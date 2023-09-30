@@ -9,14 +9,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <stdio.h>
-#include <string.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/uart/cdc_acm.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/ring_buffer.h>
 
 #include <zephyr/logging/log.h>
 #include <zephyr/usb/usb_device.h>
@@ -99,11 +96,14 @@ void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t len
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
 
+#define SW0_NODE DT_ALIAS(sw0)
+
 /*
  * A build error on this line means your board is unsupported.
  * See the sample documentation for information on how to fix this.
  */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 
 static struct RJCoreHandle rjcoreHandle;
 
@@ -117,6 +117,7 @@ int main(void)
     serial_queue_init(&usb_tx);
 
     gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
+    gpio_pin_configure_dt(&sw, GPIO_INPUT);
 
     gpio_pin_set_dt(&led, 0);
 
@@ -157,3 +158,5 @@ int main(void)
 
     return 0;
 }
+
+#pragma message("TODO: Better LED feedback - e.g. hardware failure, jtag connected etc")
