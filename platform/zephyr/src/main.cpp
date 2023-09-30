@@ -19,6 +19,7 @@
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/usbd.h>
 
+#include "led.h"
 #include "platform_impl.h"
 #include "serial_queue.h"
 
@@ -93,18 +94,6 @@ void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t len
     uart_irq_tx_enable(dev);
 }
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
-
-#define SW0_NODE DT_ALIAS(sw0)
-
-/*
- * A build error on this line means your board is unsupported.
- * See the sample documentation for information on how to fix this.
- */
-static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
-static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
-
 static struct RJCoreHandle rjcoreHandle;
 
 int main(void)
@@ -116,10 +105,7 @@ int main(void)
     serial_queue_init(&usb_rx);
     serial_queue_init(&usb_tx);
 
-    gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
-    gpio_pin_configure_dt(&sw, GPIO_INPUT);
-
-    gpio_pin_set_dt(&led, 0);
+    led_init();
 
     rjcorePlatform = PlatformImpl_Init();
 
@@ -152,11 +138,7 @@ int main(void)
         int bytesRead = serial_queue_read(&usb_rx, buffer, sizeof(buffer), K_MSEC(100));
 
         RJCore_NotifyDataReceived(&rjcoreHandle, buffer, bytesRead);
-
-        gpio_pin_toggle_dt(&led);
     }
 
     return 0;
 }
-
-#pragma message("TODO: Better LED feedback - e.g. hardware failure, jtag connected etc")

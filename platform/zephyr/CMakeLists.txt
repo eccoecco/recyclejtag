@@ -7,6 +7,8 @@ add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../librjcore" librjcore)
 
 target_sources(app
     PRIVATE
+    src/led.cpp
+    src/led.h
     src/main.cpp
     src/platform_impl.c
     src/platform_impl.h
