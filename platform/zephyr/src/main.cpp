@@ -112,6 +112,7 @@ int main(void)
     dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
     if (!device_is_ready(dev))
     {
+        led_update_error(LED_ERROR_USB_FAULT);
         LOG_ERR("CDC ACM device not ready");
         return 0;
     }
@@ -120,6 +121,7 @@ int main(void)
 
     if (ret != 0)
     {
+        led_update_error(LED_ERROR_USB_FAULT);
         LOG_ERR("Failed to enable USB");
         return 0;
     }
