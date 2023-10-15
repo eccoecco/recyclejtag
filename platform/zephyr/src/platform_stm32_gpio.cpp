@@ -107,6 +107,10 @@ int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bi
     constexpr uint32_t tmsClearMask = (0x1'0000 << rjTms.pin);
     constexpr uint32_t tdoInputMask = (1 << rjTdo.pin);
 
+    constexpr int MaxTdoToBuffer = 64;
+    char tdoBuffer[MaxTdoToBuffer];
+    int tdoBufferIndex = 0;
+
     for (; bitsToShift > 0; bitsToShift -= 8)
     {
         uint8_t tdi = buffer[0];
@@ -117,7 +121,7 @@ int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bi
 
         const int totalBitsThisShift = (bitsToShift > 8) ? 8 : bitsToShift;
 
-        for (int bitsLeft = totalBitsThisShift; bitsLeft > 0; --bitsLeft, tdi >>= 1, tms >>= 1)
+        for (int bitsLeft = totalBitsThisShift; bitsLeft > 0; --bitsLeft)
         {
             uint32_t bsrr = tckClearMask;
             bsrr |= ((tdi & 1) != 0) ? tdiSetMask : tdiClearMask;
@@ -125,23 +129,34 @@ int PlatformImpl_TapShiftPacket(void *privateData, const uint8_t *buffer, int bi
 
             gpioController->BSRR = bsrr;
 
-            // just *some* delay, because most JTAG ports can't toggle at 50-100MHz
-            // I need to tune this better, because different STM32s will run at
-            // different speeds.  Maybe I should put this into a KConfig option?
-            for (int delay = 3; delay > 0; --delay)
-            {
-                __NOP();
-            }
+            // Use __NOP() because it's volatile, and hopefully prevents the tdi/tms/tdo
+            // bit shifts from being hoisted out of here.  These shifts are used to
+            // provide the delay for TCK, otherwise you might not get a proper TCK signal haha.
+            __NOP();
+            tdi >>= 1;
+            tms >>= 1;
+            tdo >>= 1;
+            __NOP();
 
             gpioController->BSRR = tckSetMask;
 
-            tdo >>= 1;
             tdo |= ((gpioController->IDR & tdoInputMask) != 0) ? 0x80 : 0x00;
         }
 
         tdo >>= (8 - totalBitsThisShift);
 
-        PlatformImpl_TransmitData(privateData, &tdo, 1);
+        tdoBuffer[tdoBufferIndex] = tdo;
+        ++tdoBufferIndex;
+        if (tdoBufferIndex >= MaxTdoToBuffer)
+        {
+            PlatformImpl_TransmitData(privateData, tdoBuffer, tdoBufferIndex);
+            tdoBufferIndex = 0;
+        }
+    }
+
+    if (tdoBufferIndex > 0)
+    {
+        PlatformImpl_TransmitData(privateData, tdoBuffer, tdoBufferIndex);
     }
 
     return 0;
