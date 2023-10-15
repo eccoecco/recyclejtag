@@ -16,7 +16,7 @@ void led_init(void);
 // These enums are the blink pattern
 enum led_normal_status
 {
-    LED_NORMAL_IDLE = 0x1F000, //!< Medium time on, long time off
+    LED_NORMAL_IDLE = 0x18000, //!< Short time on, long time off
     LED_NORMAL_ACTIVE = 0x3E0, //!< Medium time on, medium time off
 };
 
