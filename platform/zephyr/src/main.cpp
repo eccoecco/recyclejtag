@@ -27,6 +27,8 @@
 
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
 
+static constexpr int UartPollsBeforeIdle = 10;
+
 struct serial_queue usb_rx; //!< Received over USB (to us)
 struct serial_queue usb_tx; //!< Send over USB (to host)
 
@@ -133,6 +135,8 @@ int main(void)
 
     RJCore_Init(&rjcoreHandle, rjcorePlatform, NULL);
 
+    int pollsSinceLastData = 0;
+
     while (true)
     {
         uint8_t buffer[64];
@@ -140,6 +144,23 @@ int main(void)
         int bytesRead = serial_queue_read(&usb_rx, buffer, sizeof(buffer), K_MSEC(100));
 
         RJCore_NotifyDataReceived(&rjcoreHandle, buffer, bytesRead);
+
+        if (bytesRead == 0)
+        {
+            if (pollsSinceLastData >= UartPollsBeforeIdle)
+            {
+                led_update_status(LED_NORMAL_IDLE);
+            }
+            else
+            {
+                ++pollsSinceLastData;
+            }
+        }
+        else
+        {
+            led_update_status(LED_NORMAL_ACTIVE);
+            pollsSinceLastData = 0;
+        }
     }
 
     return 0;
