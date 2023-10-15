@@ -19,12 +19,15 @@
 #include <zephyr/usb/usb_device.h>
 #include <zephyr/usb/usbd.h>
 
+#include "led.h"
 #include "platform_impl.h"
 #include "serial_queue.h"
 
 #include <rjcore/rjcore.h>
 
 LOG_MODULE_REGISTER(rjtag, LOG_LEVEL_INF);
+
+static constexpr int UartPollsBeforeIdle = 10;
 
 struct serial_queue usb_rx; //!< Received over USB (to us)
 struct serial_queue usb_tx; //!< Send over USB (to host)
@@ -93,18 +96,6 @@ void PlatformImpl_TransmitData(void *privateData, const void *buffer, size_t len
     uart_irq_tx_enable(dev);
 }
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
-
-#define SW0_NODE DT_ALIAS(sw0)
-
-/*
- * A build error on this line means your board is unsupported.
- * See the sample documentation for information on how to fix this.
- */
-static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
-static const struct gpio_dt_spec sw = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
-
 static struct RJCoreHandle rjcoreHandle;
 
 int main(void)
@@ -116,16 +107,14 @@ int main(void)
     serial_queue_init(&usb_rx);
     serial_queue_init(&usb_tx);
 
-    gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
-    gpio_pin_configure_dt(&sw, GPIO_INPUT);
-
-    gpio_pin_set_dt(&led, 0);
+    led_init();
 
     rjcorePlatform = PlatformImpl_Init();
 
     dev = DEVICE_DT_GET_ONE(zephyr_cdc_acm_uart);
     if (!device_is_ready(dev))
     {
+        led_update_error(LED_ERROR_USB_FAULT);
         LOG_ERR("CDC ACM device not ready");
         return 0;
     }
@@ -134,6 +123,7 @@ int main(void)
 
     if (ret != 0)
     {
+        led_update_error(LED_ERROR_USB_FAULT);
         LOG_ERR("Failed to enable USB");
         return 0;
     }
@@ -145,6 +135,8 @@ int main(void)
 
     RJCore_Init(&rjcoreHandle, rjcorePlatform, NULL);
 
+    int pollsSinceLastData = 0;
+
     while (true)
     {
         uint8_t buffer[64];
@@ -153,10 +145,23 @@ int main(void)
 
         RJCore_NotifyDataReceived(&rjcoreHandle, buffer, bytesRead);
 
-        gpio_pin_toggle_dt(&led);
+        if (bytesRead == 0)
+        {
+            if (pollsSinceLastData >= UartPollsBeforeIdle)
+            {
+                led_update_status(LED_NORMAL_IDLE);
+            }
+            else
+            {
+                ++pollsSinceLastData;
+            }
+        }
+        else
+        {
+            led_update_status(LED_NORMAL_ACTIVE);
+            pollsSinceLastData = 0;
+        }
     }
 
     return 0;
 }
-
-#pragma message("TODO: Better LED feedback - e.g. hardware failure, jtag connected etc")
